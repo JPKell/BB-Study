@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+{% block title %}Books – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-journals me-1"></i>Books</h4>
+  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#bookModal" onclick="openBookModal()">
+    <i class="bi bi-plus-lg me-1"></i>Add Book
+  </button>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle" id="booksTable">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Author</th>
+        <th>ISBN</th>
+        <th>Publisher</th>
+        <th>Date</th>
+        <th>Edition</th>
+        <th>Primary</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in books %}
+      <tr data-id="{{ b.id }}">
+        <td>{{ b.title }}</td>
+        <td>{{ b.author or '' }}</td>
+        <td>{{ b.isbn or '' }}</td>
+        <td>{{ b.publisher or '' }}</td>
+        <td>{{ b.publish_date or '' }}</td>
+        <td>{{ b.edition or '' }}</td>
+        <td>
+          {% if b.is_primary %}
+            <span class="badge bg-success"><i class="bi bi-star-fill"></i> Primary</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-primary me-1"
+                  onclick="openBookModal({{ b.to_dict()|tojson }})">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="deleteBook({{ b.id }})">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-muted text-center">No books yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Book Modal -->
+<div class="modal fade" id="bookModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="bookModalTitle">Add Book</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="bookId">
+        <div class="row g-2">
+          <div class="col-md-8">
+            <label class="form-label small">Title *</label>
+            <input type="text" class="form-control form-control-sm" id="bookTitle">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Edition</label>
+            <input type="text" class="form-control form-control-sm" id="bookEdition">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Author</label>
+            <input type="text" class="form-control form-control-sm" id="bookAuthor">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">ISBN</label>
+            <input type="text" class="form-control form-control-sm" id="bookIsbn">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Publisher</label>
+            <input type="text" class="form-control form-control-sm" id="bookPublisher">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Publish Date</label>
+            <input type="text" class="form-control form-control-sm" id="bookPublishDate">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">Notes</label>
+            <textarea class="form-control form-control-sm" id="bookNotes" rows="3"></textarea>
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="bookIsPrimary">
+              <label class="form-check-label" for="bookIsPrimary">Primary study book</label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveBook()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openBookModal(data) {
+  document.getElementById('bookId').value = data ? data.id : '';
+  document.getElementById('bookTitle').value = data ? data.title : '';
+  document.getElementById('bookAuthor').value = data ? (data.author || '') : '';
+  document.getElementById('bookIsbn').value = data ? (data.isbn || '') : '';
+  document.getElementById('bookPublisher').value = data ? (data.publisher || '') : '';
+  document.getElementById('bookPublishDate').value = data ? (data.publish_date || '') : '';
+  document.getElementById('bookEdition').value = data ? (data.edition || '') : '';
+  document.getElementById('bookNotes').value = data ? (data.notes || '') : '';
+  document.getElementById('bookIsPrimary').checked = data ? !!data.is_primary : false;
+  document.getElementById('bookModalTitle').textContent = data ? 'Edit Book' : 'Add Book';
+}
+
+function saveBook() {
+  const id = document.getElementById('bookId').value;
+  const payload = {
+    title: document.getElementById('bookTitle').value.trim(),
+    author: document.getElementById('bookAuthor').value.trim(),
+    isbn: document.getElementById('bookIsbn').value.trim(),
+    publisher: document.getElementById('bookPublisher').value.trim(),
+    publish_date: document.getElementById('bookPublishDate').value.trim(),
+    edition: document.getElementById('bookEdition').value.trim(),
+    notes: document.getElementById('bookNotes').value.trim(),
+    is_primary: document.getElementById('bookIsPrimary').checked,
+  };
+  if (!payload.title) { showAlert('Title is required', 'warning'); return; }
+  const url = id ? `/api/books/${id}` : '/api/books';
+  const method = id ? 'PUT' : 'POST';
+  fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { showAlert(res.error, 'danger'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('bookModal')).hide();
+      location.reload();
+    });
+}
+
+function deleteBook(id) {
+  if (!confirm('Delete this book? All related data will also be removed.')) return;
+  fetch(`/api/books/${id}`, {method:'DELETE'})
+    .then(r => r.json())
+    .then(() => location.reload());
+}
+</script>
+{% endblock %}

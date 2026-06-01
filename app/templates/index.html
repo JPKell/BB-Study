@@ -1,0 +1,311 @@
+{% extends 'base.html' %}
+{% block title %}Read – BB Study{% endblock %}
+
+{% block content %}
+<!-- Book / Page selector bar -->
+<div class="row g-2 mb-3 align-items-center">
+  <div class="col-auto">
+    <label class="col-form-label fw-semibold"><i class="bi bi-book me-1"></i>Book</label>
+  </div>
+  <div class="col-auto">
+    <select id="bookSelect" class="form-select form-select-sm" style="min-width:220px;">
+      <option value="">— Select a book —</option>
+      {% for b in books %}
+        <option value="{{ b.id }}" {% if current_book and current_book.id == b.id %}selected{% endif %}>
+          {{ b.title }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="col-form-label fw-semibold"><i class="bi bi-file-earmark me-1"></i>Page</label>
+  </div>
+  <div class="col-auto">
+    <input id="pageInput" type="text" class="form-control form-control-sm" style="width:80px;"
+           value="{{ current_page }}" placeholder="Page">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-sm btn-primary" id="loadPageBtn">
+      <i class="bi bi-arrow-right-circle me-1"></i>Load
+    </button>
+  </div>
+  {% if current_book %}
+  <div class="col-auto ms-auto text-muted small">
+    Reading: <strong>{{ current_book.title }}</strong> · Page <strong>{{ current_page }}</strong>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Main reading layout: content left, entry panel right -->
+<div class="row g-3">
+
+  <!-- LEFT: page content -->
+  <div class="col-lg-7">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-card-text me-1"></i>Page Content</span>
+        <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#addContentModal">
+          <i class="bi bi-plus-lg"></i> Add Content
+        </button>
+      </div>
+      <div class="card-body overflow-auto" style="max-height:60vh;" id="pageContentArea">
+        {% if page_content %}
+          {% set cur_para = namespace(val=None) %}
+          {% for line in page_content %}
+            {% if line.paragraph != cur_para.val %}
+              {% if cur_para.val is not none %}</p>{% endif %}
+              <p class="mb-2" data-paragraph="{{ line.paragraph }}">
+              {% set cur_para.val = line.paragraph %}
+            {% endif %}
+            <span class="d-block line-text" data-line="{{ line.line }}"
+                  data-content-id="{{ line.id }}">{{ line.content }}</span>
+          {% endfor %}
+          {% if page_content %}</p>{% endif %}
+        {% elif current_book %}
+          <p class="text-muted fst-italic">No content stored for this page yet.</p>
+        {% else %}
+          <p class="text-muted fst-italic">Select a book and page to begin reading.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: entry panel -->
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-header">
+        <ul class="nav nav-tabs card-header-tabs" id="entryTabs">
+          <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabDict">
+              <i class="bi bi-alphabet me-1"></i>Dictionary
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabRef">
+              <i class="bi bi-link-45deg me-1"></i>Book Ref
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabComm">
+              <i class="bi bi-chat-square-text me-1"></i>Commentary
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSrc">
+              <i class="bi bi-globe me-1"></i>Other Ref
+            </button>
+          </li>
+        </ul>
+      </div>
+      <div class="card-body tab-content overflow-auto" style="max-height:60vh;">
+
+        <!-- Dictionary tab -->
+        <div class="tab-pane fade show active" id="tabDict">
+          <form id="dictForm" class="mb-0">
+            <div class="mb-2">
+              <label class="form-label small mb-1">Word / Phrase</label>
+              <input type="text" class="form-control form-control-sm" id="dictWord" required>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Meaning</label>
+              <textarea class="form-control form-control-sm" id="dictMeaning" rows="3" required></textarea>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Chapter / Page / Para / Line</label>
+              <div class="row g-1">
+                <div class="col"><input type="text" class="form-control form-control-sm" id="dictChapter" placeholder="Chapter"></div>
+                <div class="col"><input type="text" class="form-control form-control-sm" id="dictPage" placeholder="Page"></div>
+                <div class="col"><input type="number" class="form-control form-control-sm" id="dictPara" placeholder="Para"></div>
+                <div class="col"><input type="number" class="form-control form-control-sm" id="dictLine" placeholder="Line"></div>
+              </div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Line Text</label>
+              <input type="text" class="form-control form-control-sm" id="dictLineText" placeholder="Quoted line">
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Notes</label>
+              <textarea class="form-control form-control-sm" id="dictNotes" rows="2"></textarea>
+            </div>
+            <button type="submit" class="btn btn-sm btn-success w-100">
+              <i class="bi bi-plus-circle me-1"></i>Save Entry
+            </button>
+          </form>
+        </div>
+
+        <!-- Book Reference tab -->
+        <div class="tab-pane fade" id="tabRef">
+          <form id="refForm" class="mb-0">
+            <div class="row g-1 mb-2">
+              <div class="col-12">
+                <label class="form-label small mb-1">Source: Chapter / Page / Para / Line</label>
+                <div class="row g-1">
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="refSrcChapter" placeholder="Ch"></div>
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="refSrcPage" placeholder="Page"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="refSrcPara" placeholder="Para"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="refSrcLine" placeholder="Line"></div>
+                </div>
+              </div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Referenced Book</label>
+              <select class="form-select form-select-sm" id="refTargetBook">
+                <option value="">— Select —</option>
+                {% for b in books %}
+                  <option value="{{ b.id }}">{{ b.title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="row g-1 mb-2">
+              <div class="col-12">
+                <label class="form-label small mb-1">Target: Chapter / Page / Para / Line</label>
+                <div class="row g-1">
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="refTgtChapter" placeholder="Ch"></div>
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="refTgtPage" placeholder="Page"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="refTgtPara" placeholder="Para"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="refTgtLine" placeholder="Line"></div>
+                </div>
+              </div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Quoted Text</label>
+              <textarea class="form-control form-control-sm" id="refQuoted" rows="2"></textarea>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Comments</label>
+              <textarea class="form-control form-control-sm" id="refComments" rows="2"></textarea>
+            </div>
+            <button type="submit" class="btn btn-sm btn-success w-100">
+              <i class="bi bi-plus-circle me-1"></i>Save Reference
+            </button>
+          </form>
+        </div>
+
+        <!-- Commentary tab -->
+        <div class="tab-pane fade" id="tabComm">
+          <form id="commForm" class="mb-0">
+            <div class="row g-1 mb-2">
+              <div class="col-12">
+                <label class="form-label small mb-1">Chapter / Page / Para / Line</label>
+                <div class="row g-1">
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="commChapter" placeholder="Ch"></div>
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="commPage" placeholder="Page"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="commPara" placeholder="Para"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="commLine" placeholder="Line"></div>
+                </div>
+              </div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Commentary</label>
+              <textarea class="form-control form-control-sm" id="commText" rows="6" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-sm btn-success w-100">
+              <i class="bi bi-plus-circle me-1"></i>Save Commentary
+            </button>
+          </form>
+        </div>
+
+        <!-- Other References tab -->
+        <div class="tab-pane fade" id="tabSrc">
+          <form id="srcForm" class="mb-0">
+            <div class="mb-2">
+              <label class="form-label small mb-1">Source Name</label>
+              <input type="text" class="form-control form-control-sm" id="srcName" required>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Type</label>
+              <select class="form-select form-select-sm" id="srcType">
+                <option value="speaker">Speaker</option>
+                <option value="website">Website</option>
+                <option value="magazine">Magazine</option>
+                <option value="book">Book (other)</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Author</label>
+              <input type="text" class="form-control form-control-sm" id="srcAuthor">
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">URL</label>
+              <input type="url" class="form-control form-control-sm" id="srcUrl">
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Publication / Notes</label>
+              <textarea class="form-control form-control-sm" id="srcNotes" rows="3"></textarea>
+            </div>
+            <button type="submit" class="btn btn-sm btn-success w-100">
+              <i class="bi bi-plus-circle me-1"></i>Save Source
+            </button>
+          </form>
+        </div>
+
+      </div><!-- /tab-content -->
+    </div><!-- /card -->
+  </div><!-- /col -->
+
+</div><!-- /row -->
+
+<!-- Page summary section (loaded dynamically) -->
+<div class="mt-4" id="pageSummarySection">
+  {% if current_book %}
+  <h5 class="border-bottom pb-2">
+    <i class="bi bi-layers me-1"></i>All annotations for page <span id="summaryPageLabel">{{ current_page }}</span>
+  </h5>
+  <div id="pageSummary" class="row g-3">
+    <p class="text-muted small">Loading…</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Add Content Modal -->
+<div class="modal fade" id="addContentModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-plus-circle me-1"></i>Add Page Content</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="addContentForm">
+          <div class="row g-2 mb-2">
+            <div class="col">
+              <label class="form-label small">Chapter</label>
+              <input type="text" class="form-control form-control-sm" id="acChapter">
+            </div>
+            <div class="col">
+              <label class="form-label small">Page</label>
+              <input type="text" class="form-control form-control-sm" id="acPage">
+            </div>
+            <div class="col">
+              <label class="form-label small">Paragraph</label>
+              <input type="number" class="form-control form-control-sm" id="acPara">
+            </div>
+            <div class="col">
+              <label class="form-label small">Line</label>
+              <input type="number" class="form-control form-control-sm" id="acLine">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Content</label>
+            <textarea class="form-control form-control-sm" id="acContent" rows="5" required></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="saveContentBtn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CURRENT_BOOK_ID = {{ current_book.id if current_book else 'null' }};
+const CURRENT_PAGE = {{ ('"' + current_page + '"') if current_page else 'null' }};
+</script>
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
+{% endblock %}

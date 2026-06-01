@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+{% block title %}Pamphlets – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-file-earmark-text me-1"></i>Pamphlets</h4>
+  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#pamphletModal" onclick="openPamphletModal()">
+    <i class="bi bi-plus-lg me-1"></i>Add Pamphlet
+  </button>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Title</th><th>Author</th><th>Publisher</th><th>Date</th><th>Series</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pamphlets %}
+      <tr data-id="{{ p.id }}">
+        <td>{{ p.title }}</td>
+        <td>{{ p.author or '' }}</td>
+        <td>{{ p.publisher or '' }}</td>
+        <td>{{ p.publish_date or '' }}</td>
+        <td>{{ p.series or '' }}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-primary me-1"
+                  onclick="openPamphletModal({{ p.to_dict()|tojson }})">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="deletePamphlet({{ p.id }})">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-muted text-center">No pamphlets yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="pamphletModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pamphletModalTitle">Add Pamphlet</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="pamphletId">
+        <div class="mb-2">
+          <label class="form-label small">Title *</label>
+          <input type="text" class="form-control form-control-sm" id="pamphletTitle">
+        </div>
+        <div class="row g-2">
+          <div class="col">
+            <label class="form-label small">Author</label>
+            <input type="text" class="form-control form-control-sm" id="pamphletAuthor">
+          </div>
+          <div class="col">
+            <label class="form-label small">Publisher</label>
+            <input type="text" class="form-control form-control-sm" id="pamphletPublisher">
+          </div>
+        </div>
+        <div class="row g-2 mt-1">
+          <div class="col">
+            <label class="form-label small">Publish Date</label>
+            <input type="text" class="form-control form-control-sm" id="pamphletDate">
+          </div>
+          <div class="col">
+            <label class="form-label small">Series</label>
+            <input type="text" class="form-control form-control-sm" id="pamphletSeries">
+          </div>
+        </div>
+        <div class="mt-2">
+          <label class="form-label small">Notes</label>
+          <textarea class="form-control form-control-sm" id="pamphletNotes" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="savePamphlet()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openPamphletModal(data) {
+  document.getElementById('pamphletId').value = data ? data.id : '';
+  document.getElementById('pamphletTitle').value = data ? data.title : '';
+  document.getElementById('pamphletAuthor').value = data ? (data.author || '') : '';
+  document.getElementById('pamphletPublisher').value = data ? (data.publisher || '') : '';
+  document.getElementById('pamphletDate').value = data ? (data.publish_date || '') : '';
+  document.getElementById('pamphletSeries').value = data ? (data.series || '') : '';
+  document.getElementById('pamphletNotes').value = data ? (data.notes || '') : '';
+  document.getElementById('pamphletModalTitle').textContent = data ? 'Edit Pamphlet' : 'Add Pamphlet';
+}
+
+function savePamphlet() {
+  const id = document.getElementById('pamphletId').value;
+  const payload = {
+    title: document.getElementById('pamphletTitle').value.trim(),
+    author: document.getElementById('pamphletAuthor').value.trim(),
+    publisher: document.getElementById('pamphletPublisher').value.trim(),
+    publish_date: document.getElementById('pamphletDate').value.trim(),
+    series: document.getElementById('pamphletSeries').value.trim(),
+    notes: document.getElementById('pamphletNotes').value.trim(),
+  };
+  if (!payload.title) { showAlert('Title is required', 'warning'); return; }
+  const url = id ? `/api/pamphlets/${id}` : '/api/pamphlets';
+  const method = id ? 'PUT' : 'POST';
+  fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { showAlert(res.error, 'danger'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('pamphletModal')).hide();
+      location.reload();
+    });
+}
+
+function deletePamphlet(id) {
+  if (!confirm('Delete this pamphlet?')) return;
+  fetch(`/api/pamphlets/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}
