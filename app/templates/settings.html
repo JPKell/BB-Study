@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Settings – BB Study{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <h4 class="mb-4"><i class="bi bi-gear me-1"></i>Settings</h4>
+
+    <div class="card mb-4">
+      <div class="card-header">Appearance</div>
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-3">
+          <span class="fw-semibold">Theme</span>
+          <div class="btn-group" role="group">
+            <button type="button"
+                    class="btn btn-sm {% if theme == 'light' %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+                    onclick="setTheme('light')">
+              <i class="bi bi-sun me-1"></i>Light
+            </button>
+            <button type="button"
+                    class="btn btn-sm {% if theme == 'dark' %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+                    onclick="setTheme('dark')">
+              <i class="bi bi-moon-stars me-1"></i>Dark
+            </button>
+          </div>
+          <span class="text-muted small">Current: <strong>{{ theme }}</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">All Settings (raw)</div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr><th>Key</th><th>Value</th></tr>
+          </thead>
+          <tbody>
+            {% for s in all_settings %}
+            <tr>
+              <td>{{ s.key }}</td>
+              <td>{{ s.value }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function setTheme(theme) {
+  fetch('/api/settings/theme', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({value: theme})
+  }).then(() => location.reload());
+}
+</script>
+{% endblock %}

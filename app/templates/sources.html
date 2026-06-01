@@ -1,0 +1,158 @@
+{% extends 'base.html' %}
+{% block title %}Sources – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-globe me-1"></i>Other Sources</h4>
+  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#srcModal" onclick="openSrcModal()">
+    <i class="bi bi-plus-lg me-1"></i>Add Source
+  </button>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead>
+      <tr><th>Name</th><th>Type</th><th>Author</th><th>Publication</th><th>Date</th><th>URL</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for s in sources %}
+      <tr data-id="{{ s.id }}">
+        <td class="fw-semibold">{{ s.name }}</td>
+        <td>
+          <span class="badge rounded-pill
+            {% if s.source_type == 'speaker' %}bg-info text-dark
+            {% elif s.source_type == 'website' %}bg-primary
+            {% elif s.source_type == 'magazine' %}bg-warning text-dark
+            {% else %}bg-secondary{% endif %}">
+            {{ s.source_type or 'other' }}
+          </span>
+        </td>
+        <td>{{ s.author or '' }}</td>
+        <td>{{ s.publication or '' }}</td>
+        <td>{{ s.publish_date or '' }}</td>
+        <td>
+          {% if s.url %}
+            <a href="{{ s.url }}" target="_blank" class="text-truncate d-inline-block" style="max-width:160px;">
+              {{ s.url }}
+            </a>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-primary me-1"
+                  onclick='openSrcModal({{ s.to_dict()|tojson }})'>
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="deleteSrc({{ s.id }})">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-muted text-center">No sources yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="srcModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="srcModalTitle">Add Source</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="srcId">
+        <div class="mb-2">
+          <label class="form-label small">Name *</label>
+          <input type="text" class="form-control form-control-sm" id="srcNameFull">
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col">
+            <label class="form-label small">Type</label>
+            <select class="form-select form-select-sm" id="srcTypeFull">
+              <option value="speaker">Speaker</option>
+              <option value="website">Website</option>
+              <option value="magazine">Magazine</option>
+              <option value="book">Book (other)</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="col">
+            <label class="form-label small">Author</label>
+            <input type="text" class="form-control form-control-sm" id="srcAuthorFull">
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col">
+            <label class="form-label small">Publication</label>
+            <input type="text" class="form-control form-control-sm" id="srcPublicationFull">
+          </div>
+          <div class="col">
+            <label class="form-label small">Date</label>
+            <input type="text" class="form-control form-control-sm" id="srcDateFull">
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">URL</label>
+          <input type="url" class="form-control form-control-sm" id="srcUrlFull">
+        </div>
+        <div>
+          <label class="form-label small">Notes</label>
+          <textarea class="form-control form-control-sm" id="srcNotesFull" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveSrc()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openSrcModal(data) {
+  document.getElementById('srcId').value = data ? data.id : '';
+  document.getElementById('srcNameFull').value = data ? data.name : '';
+  document.getElementById('srcTypeFull').value = data ? (data.source_type || 'other') : 'other';
+  document.getElementById('srcAuthorFull').value = data ? (data.author || '') : '';
+  document.getElementById('srcPublicationFull').value = data ? (data.publication || '') : '';
+  document.getElementById('srcDateFull').value = data ? (data.publish_date || '') : '';
+  document.getElementById('srcUrlFull').value = data ? (data.url || '') : '';
+  document.getElementById('srcNotesFull').value = data ? (data.notes || '') : '';
+  document.getElementById('srcModalTitle').textContent = data ? 'Edit Source' : 'Add Source';
+}
+
+function saveSrc() {
+  const id = document.getElementById('srcId').value;
+  const payload = {
+    name: document.getElementById('srcNameFull').value.trim(),
+    source_type: document.getElementById('srcTypeFull').value,
+    author: document.getElementById('srcAuthorFull').value.trim(),
+    publication: document.getElementById('srcPublicationFull').value.trim(),
+    publish_date: document.getElementById('srcDateFull').value.trim(),
+    url: document.getElementById('srcUrlFull').value.trim(),
+    notes: document.getElementById('srcNotesFull').value.trim(),
+  };
+  if (!payload.name) { showAlert('Name is required', 'warning'); return; }
+  const url = id ? `/api/sources/${id}` : '/api/sources';
+  const method = id ? 'PUT' : 'POST';
+  fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { showAlert(res.error, 'danger'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('srcModal')).hide();
+      location.reload();
+    });
+}
+
+function deleteSrc(id) {
+  if (!confirm('Delete this source?')) return;
+  fetch(`/api/sources/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}

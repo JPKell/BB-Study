@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% block title %}Commentary – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-chat-square-text me-1"></i>Commentary</h4>
+  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#commModal" onclick="openCommModal()">
+    <i class="bi bi-plus-lg me-1"></i>Add Commentary
+  </button>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle table-sm">
+    <thead>
+      <tr><th>Book</th><th>Ch</th><th>Page</th><th>Para</th><th>Line</th><th>Commentary</th><th>Date</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in entries %}
+      <tr data-id="{{ c.id }}">
+        <td class="small">{{ c.book.title }}</td>
+        <td>{{ c.chapter or '' }}</td>
+        <td>{{ c.page or '' }}</td>
+        <td>{{ c.paragraph or '' }}</td>
+        <td>{{ c.line or '' }}</td>
+        <td>{{ c.commentary_text[:80] }}{% if c.commentary_text|length > 80 %}…{% endif %}</td>
+        <td class="text-muted small">{{ c.created_at.strftime('%Y-%m-%d') if c.created_at else '' }}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-primary me-1"
+                  onclick='openCommModal({{ c.to_dict()|tojson }})'>
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="deleteComm({{ c.id }})">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-muted text-center">No commentary yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="commModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="commModalTitle">Add Commentary</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="commId">
+        <div class="mb-2">
+          <label class="form-label small">Book *</label>
+          <select class="form-select form-select-sm" id="commBook">
+            <option value="">— Select —</option>
+            {% for b in books %}<option value="{{ b.id }}">{{ b.title }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="row g-1 mb-2">
+          <div class="col"><label class="form-label small">Chapter</label>
+            <input type="text" class="form-control form-control-sm" id="commChapterFull"></div>
+          <div class="col"><label class="form-label small">Page</label>
+            <input type="text" class="form-control form-control-sm" id="commPageFull"></div>
+          <div class="col"><label class="form-label small">Para</label>
+            <input type="number" class="form-control form-control-sm" id="commParaFull"></div>
+          <div class="col"><label class="form-label small">Line</label>
+            <input type="number" class="form-control form-control-sm" id="commLineFull"></div>
+        </div>
+        <div>
+          <label class="form-label small">Commentary *</label>
+          <textarea class="form-control form-control-sm" id="commTextFull" rows="6"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveComm()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openCommModal(data) {
+  document.getElementById('commId').value = data ? data.id : '';
+  document.getElementById('commBook').value = data ? data.book_id : '';
+  document.getElementById('commChapterFull').value = data ? (data.chapter || '') : '';
+  document.getElementById('commPageFull').value = data ? (data.page || '') : '';
+  document.getElementById('commParaFull').value = data ? (data.paragraph || '') : '';
+  document.getElementById('commLineFull').value = data ? (data.line || '') : '';
+  document.getElementById('commTextFull').value = data ? data.commentary_text : '';
+  document.getElementById('commModalTitle').textContent = data ? 'Edit Commentary' : 'Add Commentary';
+}
+
+function saveComm() {
+  const id = document.getElementById('commId').value;
+  const payload = {
+    book_id: parseInt(document.getElementById('commBook').value) || null,
+    chapter: document.getElementById('commChapterFull').value.trim(),
+    page: document.getElementById('commPageFull').value.trim(),
+    paragraph: parseInt(document.getElementById('commParaFull').value) || null,
+    line: parseInt(document.getElementById('commLineFull').value) || null,
+    commentary_text: document.getElementById('commTextFull').value.trim(),
+  };
+  if (!payload.book_id || !payload.commentary_text) { showAlert('Book and commentary are required', 'warning'); return; }
+  const url = id ? `/api/commentary/${id}` : '/api/commentary';
+  const method = id ? 'PUT' : 'POST';
+  fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { showAlert(res.error, 'danger'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('commModal')).hide();
+      location.reload();
+    });
+}
+
+function deleteComm(id) {
+  if (!confirm('Delete this commentary?')) return;
+  fetch(`/api/commentary/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}

@@ -1,0 +1,156 @@
+{% extends 'base.html' %}
+{% block title %}Book Content – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-card-text me-1"></i>Book Content</h4>
+  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#contentModal" onclick="openContentModal()">
+    <i class="bi bi-plus-lg me-1"></i>Add Content
+  </button>
+</div>
+
+<!-- Filters -->
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto">
+    <select name="book_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">— All Books —</option>
+      {% for b in books %}
+        <option value="{{ b.id }}" {% if selected_book and selected_book.id == b.id %}selected{% endif %}>
+          {{ b.title }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="text" name="page" class="form-control form-control-sm" placeholder="Page…"
+           value="{{ page_filter }}" style="width:80px;">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
+  </div>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle table-sm">
+    <thead>
+      <tr><th>Book</th><th>Ch</th><th>Page</th><th>Para</th><th>Line</th><th>Content</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in content %}
+      <tr data-id="{{ c.id }}">
+        <td class="text-muted small">{{ c.book.title }}</td>
+        <td>{{ c.chapter or '' }}</td>
+        <td>{{ c.page or '' }}</td>
+        <td>{{ c.paragraph or '' }}</td>
+        <td>{{ c.line or '' }}</td>
+        <td>{{ c.content[:100] }}{% if c.content|length > 100 %}…{% endif %}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-primary me-1"
+                  onclick='openContentModal({{ c.to_dict()|tojson }})'>
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="deleteContent({{ c.id }})">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-muted text-center">No content found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="contentModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="contentModalTitle">Add Content</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="contentId">
+        <div class="mb-2">
+          <label class="form-label small">Book *</label>
+          <select class="form-select form-select-sm" id="contentBook">
+            <option value="">— Select —</option>
+            {% for b in books %}
+              <option value="{{ b.id }}">{{ b.title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col">
+            <label class="form-label small">Chapter</label>
+            <input type="text" class="form-control form-control-sm" id="contentChapter">
+          </div>
+          <div class="col">
+            <label class="form-label small">Page</label>
+            <input type="text" class="form-control form-control-sm" id="contentPage">
+          </div>
+          <div class="col">
+            <label class="form-label small">Paragraph</label>
+            <input type="number" class="form-control form-control-sm" id="contentPara">
+          </div>
+          <div class="col">
+            <label class="form-label small">Line</label>
+            <input type="number" class="form-control form-control-sm" id="contentLine">
+          </div>
+        </div>
+        <div>
+          <label class="form-label small">Content *</label>
+          <textarea class="form-control form-control-sm" id="contentText" rows="6"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveContent()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openContentModal(data) {
+  document.getElementById('contentId').value = data ? data.id : '';
+  document.getElementById('contentBook').value = data ? data.book_id : '';
+  document.getElementById('contentChapter').value = data ? (data.chapter || '') : '';
+  document.getElementById('contentPage').value = data ? (data.page || '') : '';
+  document.getElementById('contentPara').value = data ? (data.paragraph || '') : '';
+  document.getElementById('contentLine').value = data ? (data.line || '') : '';
+  document.getElementById('contentText').value = data ? data.content : '';
+  document.getElementById('contentModalTitle').textContent = data ? 'Edit Content' : 'Add Content';
+}
+
+function saveContent() {
+  const id = document.getElementById('contentId').value;
+  const payload = {
+    book_id: parseInt(document.getElementById('contentBook').value) || null,
+    chapter: document.getElementById('contentChapter').value.trim(),
+    page: document.getElementById('contentPage').value.trim(),
+    paragraph: parseInt(document.getElementById('contentPara').value) || null,
+    line: parseInt(document.getElementById('contentLine').value) || null,
+    content: document.getElementById('contentText').value.trim(),
+  };
+  if (!payload.book_id || !payload.content) { showAlert('Book and content are required', 'warning'); return; }
+  const url = id ? `/api/book-content/${id}` : '/api/book-content';
+  const method = id ? 'PUT' : 'POST';
+  fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { showAlert(res.error, 'danger'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('contentModal')).hide();
+      location.reload();
+    });
+}
+
+function deleteContent(id) {
+  if (!confirm('Delete this content line?')) return;
+  fetch(`/api/book-content/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}

@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block title %}Dictionary – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-alphabet me-1"></i>Dictionary &amp; Phrases</h4>
+  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#dictModal" onclick="openDictModal()">
+    <i class="bi bi-plus-lg me-1"></i>Add Entry
+  </button>
+</div>
+
+<div class="input-group mb-3" style="max-width:400px;">
+  <span class="input-group-text"><i class="bi bi-search"></i></span>
+  <input type="text" class="form-control form-control-sm" id="dictSearch" placeholder="Search words/phrases…">
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle" id="dictTable">
+    <thead>
+      <tr><th style="width:30%">Word / Phrase</th><th>Meaning</th><th>Notes</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr data-id="{{ e.id }}">
+        <td class="fw-semibold">{{ e.word_phrase }}</td>
+        <td>{{ e.meaning }}</td>
+        <td class="text-muted small">{{ e.notes or '' }}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-primary me-1"
+                  onclick="openDictModal({{ e.to_dict()|tojson }})">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="deleteDict({{ e.id }})">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-muted text-center">No entries yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="dictModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="dictModalTitle">Add Entry</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="dictId">
+        <div class="mb-2">
+          <label class="form-label small">Word / Phrase *</label>
+          <input type="text" class="form-control form-control-sm" id="dictWordFull">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Meaning *</label>
+          <textarea class="form-control form-control-sm" id="dictMeaningFull" rows="4"></textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Notes</label>
+          <textarea class="form-control form-control-sm" id="dictNotesFull" rows="2"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveDict()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Live search filter
+document.getElementById('dictSearch').addEventListener('input', function () {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('#dictTable tbody tr[data-id]').forEach(row => {
+    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+});
+
+function openDictModal(data) {
+  document.getElementById('dictId').value = data ? data.id : '';
+  document.getElementById('dictWordFull').value = data ? data.word_phrase : '';
+  document.getElementById('dictMeaningFull').value = data ? data.meaning : '';
+  document.getElementById('dictNotesFull').value = data ? (data.notes || '') : '';
+  document.getElementById('dictModalTitle').textContent = data ? 'Edit Entry' : 'Add Entry';
+}
+
+function saveDict() {
+  const id = document.getElementById('dictId').value;
+  const payload = {
+    word_phrase: document.getElementById('dictWordFull').value.trim(),
+    meaning: document.getElementById('dictMeaningFull').value.trim(),
+    notes: document.getElementById('dictNotesFull').value.trim(),
+  };
+  if (!payload.word_phrase || !payload.meaning) { showAlert('Word/phrase and meaning are required', 'warning'); return; }
+  const url = id ? `/api/dictionary/${id}` : '/api/dictionary';
+  const method = id ? 'PUT' : 'POST';
+  fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) { showAlert(res.error, 'danger'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('dictModal')).hide();
+      location.reload();
+    });
+}
+
+function deleteDict(id) {
+  if (!confirm('Delete this entry?')) return;
+  fetch(`/api/dictionary/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}
