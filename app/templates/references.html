@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_pagination.html' import render as paginate %}
 {% block title %}Book References – BB Study{% endblock %}
 
 {% block content %}
@@ -48,13 +49,14 @@
     </tbody>
   </table>
 </div>
+{{ paginate(pagination, 'main.references') }}
 
 <!-- Modal -->
 <div class="modal fade" id="refModal" tabindex="-1">
   <div class="modal-dialog modal-xl">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="refModalTitle">Add Reference</h5>
+        <h5 class="modal-title" id="refModalTitle">Add Reference <span id="refEditBadge" class="badge text-bg-warning ms-2 d-none">Editing existing record</span></h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -123,8 +125,21 @@
 
 {% block scripts %}
 <script>
+const refModalEl = document.getElementById('refModal');
+if (refModalEl) {
+  refModalEl.dataset.mode = 'create';
+  refModalEl.addEventListener('hidden.bs.modal', () => {
+    refModalEl.dataset.mode = 'create';
+    document.getElementById('refId').value = '';
+    document.getElementById('refEditBadge').classList.add('d-none');
+  });
+}
+
 function openRefModal(data) {
-  document.getElementById('refId').value = data ? data.id : '';
+  const isEdit = !!(data && data.id);
+  refModalEl.dataset.mode = isEdit ? 'edit' : 'create';
+  document.getElementById('refId').value = isEdit ? data.id : '';
+  document.getElementById('refEditBadge').classList.toggle('d-none', !isEdit);
   document.getElementById('refSrcBook').value = data ? data.source_book_id : '';
   document.getElementById('refSrcChapterFull').value = data ? (data.source_chapter || '') : '';
   document.getElementById('refSrcPageFull').value = data ? (data.source_page || '') : '';
@@ -141,7 +156,8 @@ function openRefModal(data) {
 }
 
 function saveRef() {
-  const id = document.getElementById('refId').value;
+  const id = document.getElementById('refId').value.trim();
+  const isEdit = refModalEl.dataset.mode === 'edit' && !!id;
   const payload = {
     source_book_id: parseInt(document.getElementById('refSrcBook').value) || null,
     source_chapter: document.getElementById('refSrcChapterFull').value.trim(),
@@ -157,12 +173,14 @@ function saveRef() {
     comments: document.getElementById('refCommentsFull').value.trim(),
   };
   if (!payload.source_book_id || !payload.target_book_id) { showAlert('Both books are required', 'warning'); return; }
-  const url = id ? `/api/references/${id}` : '/api/references';
-  const method = id ? 'PUT' : 'POST';
+  const url = isEdit ? `/api/references/${id}` : '/api/references';
+  const method = isEdit ? 'PUT' : 'POST';
   fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
     .then(r => r.json())
     .then(res => {
       if (res.error) { showAlert(res.error, 'danger'); return; }
+      document.getElementById('refId').value = '';
+      refModalEl.dataset.mode = 'create';
       bootstrap.Modal.getInstance(document.getElementById('refModal')).hide();
       location.reload();
     });

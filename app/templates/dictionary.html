@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_pagination.html' import render as paginate %}
 {% block title %}Dictionary – BB Study{% endblock %}
 
 {% block content %}
@@ -9,10 +10,16 @@
   </button>
 </div>
 
-<div class="input-group mb-3" style="max-width:400px;">
+<form class="input-group mb-3" method="get" style="max-width:440px;">
   <span class="input-group-text"><i class="bi bi-search"></i></span>
-  <input type="text" class="form-control form-control-sm" id="dictSearch" placeholder="Search words/phrases…">
-</div>
+  <input type="text" class="form-control form-control-sm" name="q"
+         placeholder="Search words/phrases…" value="{{ search_q }}"
+         aria-label="Search dictionary">
+  <button class="btn btn-outline-secondary btn-sm" type="submit">Search</button>
+  {% if search_q %}
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('main.dictionary') }}">Clear</a>
+  {% endif %}
+</form>
 
 <div class="table-responsive">
   <table class="table table-hover align-middle" id="dictTable">
@@ -42,13 +49,14 @@
     </tbody>
   </table>
 </div>
+{{ paginate(pagination, 'main.dictionary', extra_args={'q': search_q}) }}
 
 <!-- Modal -->
 <div class="modal fade" id="dictModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="dictModalTitle">Add Entry</h5>
+        <h5 class="modal-title" id="dictModalTitle">Add Entry <span id="dictEditBadge" class="badge text-bg-warning ms-2 d-none">Editing existing record</span></h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -77,16 +85,21 @@
 
 {% block scripts %}
 <script>
-// Live search filter
-document.getElementById('dictSearch').addEventListener('input', function () {
-  const q = this.value.toLowerCase();
-  document.querySelectorAll('#dictTable tbody tr[data-id]').forEach(row => {
-    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+const dictModalEl = document.getElementById('dictModal');
+if (dictModalEl) {
+  dictModalEl.dataset.mode = 'create';
+  dictModalEl.addEventListener('hidden.bs.modal', () => {
+    dictModalEl.dataset.mode = 'create';
+    document.getElementById('dictId').value = '';
+    document.getElementById('dictEditBadge').classList.add('d-none');
   });
-});
+}
 
 function openDictModal(data) {
-  document.getElementById('dictId').value = data ? data.id : '';
+  const isEdit = !!(data && data.id);
+  dictModalEl.dataset.mode = isEdit ? 'edit' : 'create';
+  document.getElementById('dictId').value = isEdit ? data.id : '';
+  document.getElementById('dictEditBadge').classList.toggle('d-none', !isEdit);
   document.getElementById('dictWordFull').value = data ? data.word_phrase : '';
   document.getElementById('dictMeaningFull').value = data ? data.meaning : '';
   document.getElementById('dictNotesFull').value = data ? (data.notes || '') : '';
@@ -94,19 +107,22 @@ function openDictModal(data) {
 }
 
 function saveDict() {
-  const id = document.getElementById('dictId').value;
+  const id = document.getElementById('dictId').value.trim();
+  const isEdit = dictModalEl.dataset.mode === 'edit' && !!id;
   const payload = {
     word_phrase: document.getElementById('dictWordFull').value.trim(),
     meaning: document.getElementById('dictMeaningFull').value.trim(),
     notes: document.getElementById('dictNotesFull').value.trim(),
   };
   if (!payload.word_phrase || !payload.meaning) { showAlert('Word/phrase and meaning are required', 'warning'); return; }
-  const url = id ? `/api/dictionary/${id}` : '/api/dictionary';
-  const method = id ? 'PUT' : 'POST';
+  const url = isEdit ? `/api/dictionary/${id}` : '/api/dictionary';
+  const method = isEdit ? 'PUT' : 'POST';
   fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
     .then(r => r.json())
     .then(res => {
       if (res.error) { showAlert(res.error, 'danger'); return; }
+      document.getElementById('dictId').value = '';
+      dictModalEl.dataset.mode = 'create';
       bootstrap.Modal.getInstance(document.getElementById('dictModal')).hide();
       location.reload();
     });

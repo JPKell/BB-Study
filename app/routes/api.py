@@ -3,10 +3,12 @@ REST API – all responses are JSON.
 Convention: POST = create, PUT = update, DELETE = delete.
 """
 from datetime import datetime
+from collections import defaultdict
 from flask import Blueprint, jsonify, request
-from ..models import (Setting, Book, Pamphlet, Dictionary, BookLocation,
+from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, BookLocation,
                       DictionaryLookup, BookReference, BookContent,
-                      Commentary, Source)
+                      BookTableOfContents, ContentTopic, Commentary, Source,
+                      Topic)
 from .. import db
 
 api_bp = Blueprint('api', __name__)
@@ -18,6 +20,106 @@ def _err(msg, code=400):
 
 def _ok(data=None, msg='OK'):
     return jsonify({'status': 'ok', 'message': msg, 'data': data})
+
+
+def _normalize_match_text(value):
+    return ' '.join((value or '').lower().split())
+
+
+def _page_sort_key(page):
+    page = str(page or '')
+    if page.startswith('front-'):
+        return (0, page)
+    roman_values = {'i': 1, 'v': 5, 'x': 10, 'l': 50, 'c': 100, 'd': 500, 'm': 1000}
+    if page.isdigit():
+        return (2, int(page))
+    total = 0
+    previous = 0
+    for char in reversed(page.lower()):
+        value = roman_values.get(char, 0)
+        if value < previous:
+            total -= value
+        else:
+            total += value
+            previous = value
+    if total:
+        return (1, total)
+    return (3, page)
+
+
+def _combine_content_fragments(rows):
+    text = ''
+    for row in rows:
+        part = row.content or ''
+        if not part:
+            continue
+        if not text:
+            text = part
+        elif text.endswith('-'):
+            text = text[:-1] + part
+        else:
+            text = f'{text} {part}'
+    return ' '.join(text.split())
+
+
+def _content_range_bounds(start_id, end_id=None):
+    start_id = int(start_id)
+    end_id = int(end_id if end_id is not None else start_id)
+    return min(start_id, end_id), max(start_id, end_id)
+
+
+def _content_range_rows(start_id, end_id=None):
+    low_id, high_id = _content_range_bounds(start_id, end_id)
+    return (BookContent.query
+            .filter(BookContent.id >= low_id, BookContent.id <= high_id)
+            .order_by(BookContent.id)
+            .all())
+
+
+def _content_range_text(start_id, end_id=None):
+    return _combine_content_fragments(_content_range_rows(start_id, end_id))
+
+
+def _sync_location_from_line_text(location):
+    """Find imported content matching a location's line text and refresh fields."""
+    if not location.book_id or not location.line_text:
+        return False
+
+    needle = _normalize_match_text(location.line_text)
+    if not needle:
+        return False
+
+    rows = (BookContent.query
+            .filter_by(book_id=location.book_id)
+            .order_by(BookContent.page, BookContent.paragraph, BookContent.verse,
+                      BookContent.line, BookContent.id)
+            .all())
+
+    grouped = defaultdict(list)
+    for row in rows:
+        grouped[(row.page, row.paragraph, row.verse)].append(row)
+
+    for group_rows in grouped.values():
+        full_text = _combine_content_fragments(group_rows)
+        if _normalize_match_text(full_text) == needle:
+            first = group_rows[0]
+            location.chapter = first.chapter_name or first.chapter
+            location.page = first.page
+            location.paragraph = first.paragraph
+            location.line_number = first.verse
+            location.line_text = full_text
+            return True
+
+    for row in rows:
+        if _normalize_match_text(row.content) == needle:
+            location.chapter = row.chapter_name or row.chapter
+            location.page = row.page
+            location.paragraph = row.paragraph
+            location.line_number = row.verse or row.line
+            location.line_text = row.content
+            return True
+
+    return False
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -62,6 +164,7 @@ def create_book():
         publish_date=data.get('publish_date'),
         edition=data.get('edition'),
         notes=data.get('notes'),
+        pdf_path=data.get('pdf_path'),
         is_primary=bool(data.get('is_primary', False)),
     )
     db.session.add(book)
@@ -81,7 +184,7 @@ def update_book(book_id):
     data = request.get_json(force=True) or {}
     if data.get('is_primary') and not book.is_primary:
         Book.query.filter_by(is_primary=True).update({'is_primary': False})
-    for field in ('title', 'author', 'isbn', 'publisher', 'publish_date', 'edition', 'notes'):
+    for field in ('title', 'author', 'isbn', 'publisher', 'publish_date', 'edition', 'notes', 'pdf_path'):
         if field in data:
             setattr(book, field, data[field])
     if 'is_primary' in data:
@@ -102,7 +205,16 @@ def delete_book(book_id):
 
 @api_bp.route('/pamphlets', methods=['GET'])
 def list_pamphlets():
-    return jsonify([p.to_dict() for p in Pamphlet.query.order_by(Pamphlet.title).all()])
+    q_text = (request.args.get('q') or '').strip()
+    q = Pamphlet.query
+    if q_text:
+        like = f'%{q_text}%'
+        q = q.filter(
+            Pamphlet.title.ilike(like) |
+            Pamphlet.series.ilike(like) |
+            Pamphlet.notes.ilike(like)
+        )
+    return jsonify([p.to_dict() for p in q.order_by(Pamphlet.series, Pamphlet.title).all()])
 
 
 @api_bp.route('/pamphlets', methods=['POST'])
@@ -110,12 +222,13 @@ def create_pamphlet():
     data = request.get_json(force=True) or {}
     if not data.get('title'):
         return _err('title is required')
+    if not data.get('series'):
+        return _err('series is required')
     p = Pamphlet(
         title=data['title'],
-        author=data.get('author'),
-        publisher=data.get('publisher'),
-        publish_date=data.get('publish_date'),
-        series=data.get('series'),
+        series=data['series'],
+        publisher=data.get('publisher') or 'AA World Services',
+        pdf_path=data.get('pdf_path'),
         notes=data.get('notes'),
     )
     db.session.add(p)
@@ -132,9 +245,11 @@ def get_pamphlet(pid):
 def update_pamphlet(pid):
     p = Pamphlet.query.get_or_404(pid)
     data = request.get_json(force=True) or {}
-    for field in ('title', 'author', 'publisher', 'publish_date', 'series', 'notes'):
+    for field in ('title', 'publisher', 'series', 'pdf_path', 'notes'):
         if field in data:
             setattr(p, field, data[field])
+    if not p.publisher:
+        p.publisher = 'AA World Services'
     db.session.commit()
     return _ok(p.to_dict())
 
@@ -145,6 +260,64 @@ def delete_pamphlet(pid):
     db.session.delete(p)
     db.session.commit()
     return _ok(msg='Pamphlet deleted')
+
+
+@api_bp.route('/pamphlets/<int:pid>/content', methods=['GET'])
+def list_pamphlet_content(pid):
+    Pamphlet.query.get_or_404(pid)
+    rows = PamphletContent.query.filter_by(pamphlet_id=pid).all()
+    rows.sort(key=lambda row: (_page_sort_key(row.page), row.paragraph or 0,
+                               row.line or 0, row.id))
+    return jsonify([row.to_dict() for row in rows])
+
+
+@api_bp.route('/pamphlets/search', methods=['GET'])
+def search_pamphlets():
+    query_text = (request.args.get('q') or '').strip()
+    limit = min(request.args.get('limit', 30, type=int), 100)
+    if not query_text:
+        return jsonify([])
+
+    needle = _normalize_match_text(query_text)
+    matched = {}
+    meta_like = f'%{query_text}%'
+    for pamphlet in Pamphlet.query.filter(
+        Pamphlet.title.ilike(meta_like) |
+        Pamphlet.series.ilike(meta_like) |
+        Pamphlet.notes.ilike(meta_like)
+    ).order_by(Pamphlet.series, Pamphlet.title).limit(limit).all():
+        matched[pamphlet.id] = {
+            'pamphlet': pamphlet,
+            'excerpt': pamphlet.notes or pamphlet.title,
+            'page': None,
+        }
+
+    rows = (PamphletContent.query
+            .join(Pamphlet)
+            .order_by(Pamphlet.series, Pamphlet.title, PamphletContent.page,
+                      PamphletContent.paragraph, PamphletContent.line, PamphletContent.id)
+            .all())
+    for row in rows:
+        if row.pamphlet_id in matched:
+            continue
+        if needle in _normalize_match_text(row.content):
+            matched[row.pamphlet_id] = {
+                'pamphlet': row.pamphlet,
+                'excerpt': row.content,
+                'page': row.page,
+            }
+            if len(matched) >= limit:
+                break
+
+    return jsonify([{
+        'id': item['pamphlet'].id,
+        'title': item['pamphlet'].title,
+        'series': item['pamphlet'].series,
+        'publisher': item['pamphlet'].publisher,
+        'pdf_path': item['pamphlet'].pdf_path,
+        'page': item['page'],
+        'excerpt': item['excerpt'],
+    } for item in matched.values()])
 
 
 # ── Dictionary ────────────────────────────────────────────────────────────────
@@ -197,6 +370,340 @@ def delete_dictionary(eid):
     return _ok(msg='Entry deleted')
 
 
+# ── Topics / Tags ────────────────────────────────────────────────────────────
+
+@api_bp.route('/topics', methods=['GET'])
+def list_topics():
+    q = request.args.get('q', '').strip()
+    query = Topic.query
+    if q:
+        query = query.filter(Topic.name.ilike(f'%{q}%'))
+    return jsonify([topic.to_dict() for topic in query.order_by(Topic.name).all()])
+
+
+@api_bp.route('/topics', methods=['POST'])
+def create_topic():
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return _err('name is required')
+    existing = Topic.query.filter(Topic.name.ilike(name)).first()
+    if existing:
+        return _ok(existing.to_dict(), 'Topic already exists')
+    topic = Topic(name=name, description=data.get('description'))
+    db.session.add(topic)
+    db.session.commit()
+    return _ok(topic.to_dict(), 'Topic created'), 201
+
+
+@api_bp.route('/topics/<int:topic_id>', methods=['PUT'])
+def update_topic(topic_id):
+    topic = Topic.query.get_or_404(topic_id)
+    data = request.get_json(force=True) or {}
+    if 'name' in data:
+        topic.name = data['name'].strip()
+    if 'description' in data:
+        topic.description = data['description']
+    db.session.commit()
+    return _ok(topic.to_dict())
+
+
+@api_bp.route('/topics/<int:topic_id>', methods=['DELETE'])
+def delete_topic(topic_id):
+    topic = Topic.query.get_or_404(topic_id)
+    db.session.delete(topic)
+    db.session.commit()
+    return _ok(msg='Topic deleted')
+
+
+@api_bp.route('/content-topics', methods=['GET'])
+def list_content_topics():
+    topic_id = request.args.get('topic_id', type=int)
+    book_content_id = request.args.get('book_content_id', type=int)
+    q = ContentTopic.query
+    if topic_id:
+        q = q.filter_by(topic_id=topic_id)
+    if book_content_id:
+        q = q.filter(
+            db.func.min(
+                db.func.coalesce(ContentTopic.start_content_id, ContentTopic.book_content_id),
+                db.func.coalesce(ContentTopic.end_content_id, ContentTopic.book_content_id)
+            ) <= book_content_id,
+            db.func.max(
+                db.func.coalesce(ContentTopic.start_content_id, ContentTopic.book_content_id),
+                db.func.coalesce(ContentTopic.end_content_id, ContentTopic.book_content_id)
+            ) >= book_content_id,
+        )
+    return jsonify([link.to_dict() for link in q.order_by(ContentTopic.created_at.desc()).all()])
+
+
+@api_bp.route('/content-topics', methods=['POST'])
+def create_content_topic():
+    data = request.get_json(force=True) or {}
+    topic_id = data.get('topic_id')
+    content_ids = data.get('content_ids') or []
+    start_content_id = data.get('start_content_id')
+    end_content_id = data.get('end_content_id')
+    notes = data.get('notes')
+    if content_ids and not start_content_id:
+        parsed_ids = [int(content_id) for content_id in content_ids if content_id]
+        if parsed_ids:
+            start_content_id = min(parsed_ids)
+            end_content_id = max(parsed_ids)
+    if not topic_id or not start_content_id:
+        return _err('topic_id and start_content_id are required')
+    if not end_content_id:
+        end_content_id = start_content_id
+    Topic.query.get_or_404(topic_id)
+    low_id, high_id = _content_range_bounds(start_content_id, end_content_id)
+    start = BookContent.query.get_or_404(low_id)
+    BookContent.query.get_or_404(high_id)
+    link = ContentTopic.query.filter_by(
+        topic_id=topic_id,
+        book_content_id=low_id,
+        start_content_id=low_id,
+        end_content_id=high_id,
+    ).first()
+    if not link:
+        link = ContentTopic(
+            topic_id=topic_id,
+            book_content_id=low_id,
+            start_content_id=low_id,
+            end_content_id=high_id,
+            notes=notes,
+        )
+        db.session.add(link)
+    elif notes is not None:
+        link.notes = notes
+    db.session.commit()
+    return _ok(link.to_dict(), 'Topic applied')
+
+
+@api_bp.route('/content-topics/<int:link_id>', methods=['DELETE'])
+def delete_content_topic(link_id):
+    link = ContentTopic.query.get_or_404(link_id)
+    db.session.delete(link)
+    db.session.commit()
+    return _ok(msg='Content topic deleted')
+
+
+@api_bp.route('/book-content/range', methods=['GET'])
+def get_book_content_range():
+    start_id = request.args.get('start_id', type=int)
+    end_id = request.args.get('end_id', type=int)
+    if not start_id:
+        return _err('start_id is required')
+    rows = _content_range_rows(start_id, end_id or start_id)
+    if not rows:
+        return _err('No content found for range', 404)
+    first = rows[0]
+    last = rows[-1]
+    return jsonify({
+        'start_content_id': first.id,
+        'end_content_id': last.id,
+        'low_content_id': first.id,
+        'high_content_id': last.id,
+        'book_id': first.book_id,
+        'book_title': first.book.title if first.book else None,
+        'chapter_name': first.chapter_name or first.chapter,
+        'page': first.page,
+        'paragraph': first.paragraph,
+        'line': first.line,
+        'verse': first.verse,
+        'end_page': last.page,
+        'end_paragraph': last.paragraph,
+        'end_line': last.line,
+        'end_verse': last.verse,
+        'content': _combine_content_fragments(rows),
+        'content_ids': [row.id for row in rows],
+    })
+
+
+@api_bp.route('/content-topics/<int:link_id>', methods=['GET'])
+def get_content_topic(link_id):
+    return jsonify(ContentTopic.query.get_or_404(link_id).to_dict())
+
+
+@api_bp.route('/content-topics/<int:link_id>', methods=['PUT'])
+def update_content_topic(link_id):
+    link = ContentTopic.query.get_or_404(link_id)
+    data = request.get_json(force=True) or {}
+
+    if 'topic_id' in data:
+        topic_id = data.get('topic_id')
+        if not topic_id:
+            return _err('topic_id is required')
+        Topic.query.get_or_404(topic_id)
+
+        link.topic_id = topic_id
+
+    if 'start_content_id' in data or 'end_content_id' in data or 'content_ids' in data:
+        start_content_id = data.get('start_content_id') or link.start_content_id or link.book_content_id
+        end_content_id = data.get('end_content_id') or link.end_content_id or start_content_id
+        content_ids = data.get('content_ids') or []
+        if content_ids:
+            parsed_ids = [int(content_id) for content_id in content_ids if content_id]
+            if parsed_ids:
+                start_content_id = min(parsed_ids)
+                end_content_id = max(parsed_ids)
+        low_id, high_id = _content_range_bounds(start_content_id, end_content_id)
+        BookContent.query.get_or_404(low_id)
+        BookContent.query.get_or_404(high_id)
+        link.book_content_id = low_id
+        link.start_content_id = low_id
+        link.end_content_id = high_id
+
+    if 'notes' in data:
+        link.notes = data.get('notes')
+
+    db.session.commit()
+    return _ok(link.to_dict(), 'Content topic updated')
+
+
+@api_bp.route('/search', methods=['GET'])
+def search_content():
+    query_text = (request.args.get('q') or '').strip()
+    topic_id = request.args.get('topic_id', type=int)
+    book_id = request.args.get('book_id', type=int)
+    limit = min(request.args.get('limit', 50, type=int), 200)
+    if not query_text and not topic_id:
+        return jsonify([])
+
+    rows_query = BookContent.query
+    if book_id:
+        rows_query = rows_query.filter_by(book_id=book_id)
+    rows = rows_query.order_by(BookContent.book_id, BookContent.page, BookContent.paragraph,
+                               BookContent.verse, BookContent.line, BookContent.id).all()
+
+    tagged_ranges = []
+    topic_name_matches = []
+    if topic_id:
+        links = ContentTopic.query.filter_by(topic_id=topic_id).all()
+        tagged_ranges = [
+            _content_range_bounds(link.start_content_id or link.book_content_id,
+                                  link.end_content_id or link.book_content_id)
+            for link in links
+        ]
+    elif query_text:
+        topic_name_matches = Topic.query.filter(Topic.name.ilike(f'%{query_text}%')).all()
+        if topic_name_matches:
+            topic_ids = [topic.id for topic in topic_name_matches]
+            links = ContentTopic.query.filter(ContentTopic.topic_id.in_(topic_ids)).all()
+            tagged_ranges = [
+                _content_range_bounds(link.start_content_id or link.book_content_id,
+                                      link.end_content_id or link.book_content_id)
+                for link in links
+            ]
+
+    grouped = defaultdict(list)
+    for row in rows:
+        grouped[(row.book_id, row.page, row.paragraph, row.verse)].append(row)
+
+    results = []
+    needle = _normalize_match_text(query_text)
+    for group_rows in grouped.values():
+        verse_text = _combine_content_fragments(group_rows)
+        normalized = _normalize_match_text(verse_text)
+        content_ids = [row.id for row in group_rows]
+        text_matches = bool(needle and needle in normalized)
+        tag_matches = bool(tagged_ranges and any(
+            low_id <= content_id <= high_id
+            for content_id in content_ids
+            for low_id, high_id in tagged_ranges
+        ))
+        if not text_matches and not tag_matches:
+            continue
+
+        first = group_rows[0]
+        all_links = ContentTopic.query.all()
+        topics = []
+        seen_topics = set()
+        for link in all_links:
+            low_id, high_id = _content_range_bounds(
+                link.start_content_id or link.book_content_id,
+                link.end_content_id or link.book_content_id,
+            )
+            if not any(low_id <= content_id <= high_id for content_id in content_ids):
+                continue
+            if link.topic_id not in seen_topics:
+                seen_topics.add(link.topic_id)
+                topics.append({'id': link.topic_id, 'name': link.topic.name if link.topic else ''})
+
+        results.append({
+            'book_id': first.book_id,
+            'book_title': first.book.title if first.book else None,
+            'chapter_number': first.chapter_number,
+            'chapter_name': first.chapter_name or first.chapter,
+            'page': first.page,
+            'paragraph': first.paragraph,
+            'verse': first.verse,
+            'line': first.line,
+            'excerpt': verse_text,
+            'content_ids': content_ids,
+            'topics': topics,
+            'match_type': 'text+tag' if text_matches and tag_matches else ('text' if text_matches else 'tag'),
+        })
+        if len(results) >= limit:
+            break
+
+    if query_text and not book_id and len(results) < limit:
+        pamphlet_hits = []
+        rows = (PamphletContent.query
+                .join(Pamphlet)
+                .order_by(Pamphlet.series, Pamphlet.title, PamphletContent.page,
+                          PamphletContent.paragraph, PamphletContent.line, PamphletContent.id)
+                .all())
+        seen_pamphlets = set()
+        for row in rows:
+            if row.pamphlet_id in seen_pamphlets:
+                continue
+            if needle in _normalize_match_text(row.content):
+                seen_pamphlets.add(row.pamphlet_id)
+                pamphlet_hits.append({
+                    'result_type': 'pamphlet',
+                    'pamphlet_id': row.pamphlet_id,
+                    'pamphlet_title': row.pamphlet.title if row.pamphlet else None,
+                    'series': row.pamphlet.series if row.pamphlet else None,
+                    'publisher': row.pamphlet.publisher if row.pamphlet else None,
+                    'page': row.page,
+                    'paragraph': row.paragraph,
+                    'line': row.line,
+                    'excerpt': row.content,
+                    'match_type': 'pamphlet',
+                })
+                if len(results) + len(pamphlet_hits) >= limit:
+                    break
+
+        if len(results) + len(pamphlet_hits) < limit:
+            meta_like = f'%{query_text}%'
+            for pamphlet in Pamphlet.query.filter(
+                Pamphlet.title.ilike(meta_like) |
+                Pamphlet.series.ilike(meta_like) |
+                Pamphlet.notes.ilike(meta_like)
+            ).order_by(Pamphlet.series, Pamphlet.title).all():
+                if pamphlet.id in seen_pamphlets:
+                    continue
+                seen_pamphlets.add(pamphlet.id)
+                pamphlet_hits.append({
+                    'result_type': 'pamphlet',
+                    'pamphlet_id': pamphlet.id,
+                    'pamphlet_title': pamphlet.title,
+                    'series': pamphlet.series,
+                    'publisher': pamphlet.publisher,
+                    'page': None,
+                    'paragraph': None,
+                    'line': None,
+                    'excerpt': pamphlet.notes or pamphlet.title,
+                    'match_type': 'pamphlet',
+                })
+                if len(results) + len(pamphlet_hits) >= limit:
+                    break
+
+        results.extend(pamphlet_hits)
+
+    return jsonify(results)
+
+
 # ── Book Locations ────────────────────────────────────────────────────────────
 
 @api_bp.route('/book-locations', methods=['GET'])
@@ -221,20 +728,27 @@ def create_book_location():
         line_number=data.get('line_number'),
         line_text=data.get('line_text'),
     )
+    matched = _sync_location_from_line_text(loc)
     db.session.add(loc)
     db.session.commit()
-    return _ok(loc.to_dict(), 'Location created'), 201
+    result = loc.to_dict()
+    result['line_text_matched'] = matched
+    return _ok(result, 'Location created'), 201
 
 
 @api_bp.route('/book-locations/<int:lid>', methods=['PUT'])
 def update_book_location(lid):
     loc = BookLocation.query.get_or_404(lid)
     data = request.get_json(force=True) or {}
+    should_sync = 'line_text' in data or 'book_id' in data
     for field in ('book_id', 'chapter', 'page', 'paragraph', 'line_number', 'line_text'):
         if field in data:
             setattr(loc, field, data[field])
+    matched = _sync_location_from_line_text(loc) if should_sync else False
     db.session.commit()
-    return _ok(loc.to_dict())
+    result = loc.to_dict()
+    result['line_text_matched'] = matched
+    return _ok(result)
 
 
 @api_bp.route('/book-locations/<int:lid>', methods=['DELETE'])
@@ -271,6 +785,11 @@ def create_dictionary_lookup():
     db.session.add(lk)
     db.session.commit()
     return _ok(lk.to_dict(), 'Lookup created'), 201
+
+
+@api_bp.route('/dictionary-lookup/<int:lid>', methods=['GET'])
+def get_dictionary_lookup(lid):
+    return jsonify(DictionaryLookup.query.get_or_404(lid).to_dict())
 
 
 @api_bp.route('/dictionary-lookup/<int:lid>', methods=['DELETE'])
@@ -359,15 +878,21 @@ def list_book_content():
     book_id = request.args.get('book_id', type=int)
     page = request.args.get('page')
     chapter = request.args.get('chapter')
+    chapter_name = request.args.get('chapter_name')
+    content_mode = request.args.get('content_mode')
     q = BookContent.query
     if book_id:
         q = q.filter_by(book_id=book_id)
     if page:
         q = q.filter_by(page=page)
     if chapter:
-        q = q.filter_by(chapter=chapter)
-    results = q.order_by(BookContent.chapter, BookContent.page,
-                         BookContent.paragraph, BookContent.line).all()
+        q = q.filter_by(chapter_name=chapter)
+    if chapter_name:
+        q = q.filter_by(chapter_name=chapter_name)
+    if content_mode:
+        q = q.filter_by(content_mode=content_mode)
+    results = q.order_by(BookContent.chapter_number, BookContent.chapter_name, BookContent.page,
+                         BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id).all()
     return jsonify([r.to_dict() for r in results])
 
 
@@ -378,10 +903,14 @@ def create_book_content():
         return _err('book_id and content are required')
     bc = BookContent(
         book_id=data['book_id'],
-        chapter=data.get('chapter'),
+        content_mode=data.get('content_mode', 'sentence'),
+        chapter_number=data.get('chapter_number'),
+        chapter_name=data.get('chapter_name') or data.get('chapter'),
+        chapter=data.get('chapter_name') or data.get('chapter'),
         page=data.get('page'),
         paragraph=data.get('paragraph'),
         line=data.get('line'),
+        verse=data.get('verse'),
         content=data['content'],
     )
     db.session.add(bc)
@@ -398,9 +927,11 @@ def get_book_content(cid):
 def update_book_content(cid):
     bc = BookContent.query.get_or_404(cid)
     data = request.get_json(force=True) or {}
-    for field in ('book_id', 'chapter', 'page', 'paragraph', 'line', 'content'):
+    for field in ('book_id', 'content_mode', 'chapter_number', 'chapter_name', 'chapter', 'page', 'paragraph', 'line', 'verse', 'content'):
         if field in data:
             setattr(bc, field, data[field])
+    if 'chapter_name' in data and 'chapter' not in data:
+        bc.chapter = data['chapter_name']
     db.session.commit()
     return _ok(bc.to_dict())
 
@@ -411,6 +942,59 @@ def delete_book_content(cid):
     db.session.delete(bc)
     db.session.commit()
     return _ok(msg='Content deleted')
+
+
+# ── Book Table of Contents ───────────────────────────────────────────────────
+
+@api_bp.route('/book-toc', methods=['GET'])
+def list_book_toc():
+    book_id = request.args.get('book_id', type=int)
+    q = BookTableOfContents.query
+    if book_id:
+        q = q.filter_by(book_id=book_id)
+    entries = q.order_by(BookTableOfContents.sort_order, BookTableOfContents.id).all()
+    return jsonify([entry.to_dict() for entry in entries])
+
+
+@api_bp.route('/book-toc', methods=['POST'])
+def create_book_toc():
+    data = request.get_json(force=True) or {}
+    if not data.get('book_id') or not data.get('title'):
+        return _err('book_id and title are required')
+    entry = BookTableOfContents(
+        book_id=data['book_id'],
+        sort_order=data.get('sort_order') or 0,
+        chapter_number=data.get('chapter_number'),
+        chapter_name=data.get('chapter_name') or data.get('title'),
+        chapter=data.get('chapter_number') or data.get('chapter'),
+        title=data['title'],
+        page=data.get('page'),
+        include_by_default=bool(data.get('include_by_default', True)),
+    )
+    db.session.add(entry)
+    db.session.commit()
+    return _ok(entry.to_dict(), 'Table of contents entry created'), 201
+
+
+@api_bp.route('/book-toc/<int:toc_id>', methods=['PUT'])
+def update_book_toc(toc_id):
+    entry = BookTableOfContents.query.get_or_404(toc_id)
+    data = request.get_json(force=True) or {}
+    for field in ('book_id', 'sort_order', 'chapter_number', 'chapter_name', 'chapter', 'title', 'page', 'include_by_default'):
+        if field in data:
+            setattr(entry, field, data[field])
+    if 'chapter_name' in data and 'title' not in data:
+        entry.title = data['chapter_name']
+    db.session.commit()
+    return _ok(entry.to_dict())
+
+
+@api_bp.route('/book-toc/<int:toc_id>', methods=['DELETE'])
+def delete_book_toc(toc_id):
+    entry = BookTableOfContents.query.get_or_404(toc_id)
+    db.session.delete(entry)
+    db.session.commit()
+    return _ok(msg='Table of contents entry deleted')
 
 
 # ── Commentary ────────────────────────────────────────────────────────────────
@@ -432,6 +1016,7 @@ def create_commentary():
     data = request.get_json(force=True) or {}
     if not data.get('book_id') or not data.get('commentary_text'):
         return _err('book_id and commentary_text are required')
+    Book.query.get_or_404(data['book_id'])
     c = Commentary(
         book_id=data['book_id'],
         chapter=data.get('chapter'),
@@ -475,9 +1060,15 @@ def delete_commentary(cid):
 @api_bp.route('/sources', methods=['GET'])
 def list_sources():
     source_type = request.args.get('type')
+    book_id = request.args.get('book_id', type=int)
+    page = request.args.get('page')
     q = Source.query
     if source_type:
         q = q.filter_by(source_type=source_type)
+    if book_id:
+        q = q.filter_by(book_id=book_id)
+    if page:
+        q = q.filter_by(page=page)
     return jsonify([s.to_dict() for s in q.order_by(Source.name).all()])
 
 
@@ -487,6 +1078,11 @@ def create_source():
     if not data.get('name'):
         return _err('name is required')
     s = Source(
+        book_id=data.get('book_id'),
+        page=data.get('page'),
+        chapter=data.get('chapter'),
+        paragraph=data.get('paragraph'),
+        line=data.get('line'),
         name=data['name'],
         source_type=data.get('source_type', 'other'),
         url=data.get('url'),
@@ -509,7 +1105,8 @@ def get_source(sid):
 def update_source(sid):
     s = Source.query.get_or_404(sid)
     data = request.get_json(force=True) or {}
-    for field in ('name', 'source_type', 'url', 'author', 'publication', 'publish_date', 'notes'):
+    for field in ('book_id', 'page', 'chapter', 'paragraph', 'line',
+                  'name', 'source_type', 'url', 'author', 'publication', 'publish_date', 'notes'):
         if field in data:
             setattr(s, field, data[field])
     db.session.commit()
@@ -536,7 +1133,7 @@ def page_summary():
 
     content = [c.to_dict() for c in
                BookContent.query.filter_by(book_id=book_id, page=page)
-               .order_by(BookContent.paragraph, BookContent.line).all()]
+               .order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id).all()]
 
     commentary = [c.to_dict() for c in
                   Commentary.query.filter_by(book_id=book_id, page=page)
@@ -548,6 +1145,10 @@ def page_summary():
                 BookReference.source_page == page
             ).order_by(BookReference.created_at).all()]
 
+    sources = [s.to_dict() for s in
+               Source.query.filter_by(book_id=book_id, page=page)
+               .order_by(Source.created_at).all()]
+
     # Dictionary lookups via book locations
     locs = BookLocation.query.filter_by(book_id=book_id, page=page).all()
     loc_ids = [l.id for l in locs]
@@ -558,9 +1159,26 @@ def page_summary():
         ).all()
         dict_lookups = [lk.to_dict() for lk in lookups]
 
+    content_ids = [c['id'] for c in content]
+    topic_links = []
+    if content_ids:
+        page_low_id = min(content_ids)
+        page_high_id = max(content_ids)
+        links = ContentTopic.query.order_by(ContentTopic.created_at).all()
+        topic_links = []
+        for link in links:
+            low_id, high_id = _content_range_bounds(
+                link.start_content_id or link.book_content_id,
+                link.end_content_id or link.book_content_id,
+            )
+            if low_id <= page_high_id and high_id >= page_low_id:
+                topic_links.append(link.to_dict())
+
     return jsonify({
         'content': content,
         'commentary': commentary,
         'references': refs,
+        'sources': sources,
         'dictionary': dict_lookups,
+        'topics': topic_links,
     })

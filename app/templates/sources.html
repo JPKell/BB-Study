@@ -12,7 +12,7 @@
 <div class="table-responsive">
   <table class="table table-hover align-middle">
     <thead>
-      <tr><th>Name</th><th>Type</th><th>Author</th><th>Publication</th><th>Date</th><th>URL</th><th></th></tr>
+      <tr><th>Name</th><th>Type</th><th>Author</th><th>Publication</th><th>Date</th><th>Reference</th><th></th></tr>
     </thead>
     <tbody>
       {% for s in sources %}
@@ -23,6 +23,7 @@
             {% if s.source_type == 'speaker' %}bg-info text-dark
             {% elif s.source_type == 'website' %}bg-primary
             {% elif s.source_type == 'magazine' %}bg-warning text-dark
+            {% elif s.source_type == 'pamphlet' %}bg-success
             {% else %}bg-secondary{% endif %}">
             {{ s.source_type or 'other' }}
           </span>
@@ -32,9 +33,13 @@
         <td>{{ s.publish_date or '' }}</td>
         <td>
           {% if s.url %}
-            <a href="{{ s.url }}" target="_blank" class="text-truncate d-inline-block" style="max-width:160px;">
-              {{ s.url }}
-            </a>
+            {% if s.url.startswith('http://') or s.url.startswith('https://') %}
+              <a href="{{ s.url }}" target="_blank" class="text-truncate d-inline-block" style="max-width:160px;">
+                {{ s.url }}
+              </a>
+            {% else %}
+              <span class="text-truncate d-inline-block" style="max-width:160px;">{{ s.url }}</span>
+            {% endif %}
           {% endif %}
         </td>
         <td class="text-end">
@@ -60,7 +65,7 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="srcModalTitle">Add Source</h5>
+        <h5 class="modal-title" id="srcModalTitle">Add Source <span id="srcEditBadge" class="badge text-bg-warning ms-2 d-none">Editing existing record</span></h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -76,6 +81,7 @@
               <option value="speaker">Speaker</option>
               <option value="website">Website</option>
               <option value="magazine">Magazine</option>
+              <option value="pamphlet">Pamphlet</option>
               <option value="book">Book (other)</option>
               <option value="other">Other</option>
             </select>
@@ -96,8 +102,8 @@
           </div>
         </div>
         <div class="mb-2">
-          <label class="form-label small">URL</label>
-          <input type="url" class="form-control form-control-sm" id="srcUrlFull">
+          <label class="form-label small">URL / Reference / Identifier</label>
+          <input type="text" class="form-control form-control-sm" id="srcUrlFull">
         </div>
         <div>
           <label class="form-label small">Notes</label>
@@ -115,8 +121,21 @@
 
 {% block scripts %}
 <script>
+const srcModalEl = document.getElementById('srcModal');
+if (srcModalEl) {
+  srcModalEl.dataset.mode = 'create';
+  srcModalEl.addEventListener('hidden.bs.modal', () => {
+    srcModalEl.dataset.mode = 'create';
+    document.getElementById('srcId').value = '';
+    document.getElementById('srcEditBadge').classList.add('d-none');
+  });
+}
+
 function openSrcModal(data) {
-  document.getElementById('srcId').value = data ? data.id : '';
+  const isEdit = !!(data && data.id);
+  srcModalEl.dataset.mode = isEdit ? 'edit' : 'create';
+  document.getElementById('srcId').value = isEdit ? data.id : '';
+  document.getElementById('srcEditBadge').classList.toggle('d-none', !isEdit);
   document.getElementById('srcNameFull').value = data ? data.name : '';
   document.getElementById('srcTypeFull').value = data ? (data.source_type || 'other') : 'other';
   document.getElementById('srcAuthorFull').value = data ? (data.author || '') : '';
@@ -128,7 +147,8 @@ function openSrcModal(data) {
 }
 
 function saveSrc() {
-  const id = document.getElementById('srcId').value;
+  const id = document.getElementById('srcId').value.trim();
+  const isEdit = srcModalEl.dataset.mode === 'edit' && !!id;
   const payload = {
     name: document.getElementById('srcNameFull').value.trim(),
     source_type: document.getElementById('srcTypeFull').value,
@@ -139,12 +159,14 @@ function saveSrc() {
     notes: document.getElementById('srcNotesFull').value.trim(),
   };
   if (!payload.name) { showAlert('Name is required', 'warning'); return; }
-  const url = id ? `/api/sources/${id}` : '/api/sources';
-  const method = id ? 'PUT' : 'POST';
+  const url = isEdit ? `/api/sources/${id}` : '/api/sources';
+  const method = isEdit ? 'PUT' : 'POST';
   fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
     .then(r => r.json())
     .then(res => {
       if (res.error) { showAlert(res.error, 'danger'); return; }
+      document.getElementById('srcId').value = '';
+      srcModalEl.dataset.mode = 'create';
       bootstrap.Modal.getInstance(document.getElementById('srcModal')).hide();
       location.reload();
     });

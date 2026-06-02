@@ -39,6 +39,14 @@
              href="{{ url_for('main.dictionary') }}"><i class="bi bi-alphabet me-1"></i>Dictionary</a>
         </li>
         <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'main.topics' %}active{% endif %}"
+             href="{{ url_for('main.topics') }}"><i class="bi bi-tags me-1"></i>Topics</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'main.search' %}active{% endif %}"
+             href="{{ url_for('main.search') }}"><i class="bi bi-search me-1"></i>Search</a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link {% if request.endpoint == 'main.book_content' %}active{% endif %}"
              href="{{ url_for('main.book_content') }}"><i class="bi bi-card-text me-1"></i>Content</a>
         </li>
@@ -70,8 +78,9 @@
   </div>
 </nav>
 
+<div id="alertContainer"></div>
+
 <main class="container-fluid py-3">
-  <div id="alertContainer"></div>
   {% block content %}{% endblock %}
 </main>
 

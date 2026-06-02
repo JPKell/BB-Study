@@ -1,0 +1,212 @@
+{% extends 'base.html' %}
+{% block title %}Search – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-search me-1"></i>Search</h4>
+</div>
+
+<div class="row g-2 align-items-end mb-3 position-relative">
+  <div class="col-md-5">
+    <label class="form-label small">Text or Topic</label>
+    <input type="text" class="form-control form-control-sm" id="searchQuery" placeholder="Search text or tags...">
+  </div>
+  <div class="col-md-3">
+    <label class="form-label small">Topic</label>
+    <select class="form-select form-select-sm" id="searchTopic">
+      <option value="">Any topic</option>
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label small">Book</label>
+    <select class="form-select form-select-sm" id="searchBook">
+      <option value="">All books</option>
+      {% for book in books %}
+        <option value="{{ book.id }}">{{ book.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-1">
+    <button class="btn btn-sm btn-primary w-100" onclick="runSearch()"><i class="bi bi-search"></i></button>
+  </div>
+</div>
+
+<div id="searchResults" class="search-results-dropdown search-page-results">
+  <div class="search-result-item text-muted">Enter text, choose a tag, or both.</div>
+</div>
+
+<nav id="searchPagination" class="mt-3 d-none" aria-label="Search results pages">
+  <div class="d-flex flex-column align-items-center gap-1">
+    <ul class="pagination pagination-sm mb-0" id="searchPaginationList"></ul>
+    <small class="text-muted" id="searchPaginationInfo"></small>
+  </div>
+</nav>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SEARCH_PER_PAGE = 20;
+let _allResults = [];
+let _currentPage = 1;
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadTopics();
+  document.getElementById('searchQuery').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runSearch();
+  });
+});
+
+function loadTopics() {
+  fetch('/api/topics').then(r => r.json()).then(topics => {
+    const select = document.getElementById('searchTopic');
+    topics.forEach(topic => {
+      const option = document.createElement('option');
+      option.value = topic.id;
+      option.textContent = topic.name;
+      select.appendChild(option);
+    });
+  });
+}
+
+function runSearch() {
+  const params = new URLSearchParams();
+  const q = document.getElementById('searchQuery').value.trim();
+  const topicId = document.getElementById('searchTopic').value;
+  const bookId = document.getElementById('searchBook').value;
+  if (q) params.set('q', q);
+  if (topicId) params.set('topic_id', topicId);
+  if (bookId) params.set('book_id', bookId);
+  const results = document.getElementById('searchResults');
+  if (!q && !topicId) {
+    results.innerHTML = '<div class="search-result-item text-muted">Enter text, choose a tag, or both.</div>';
+    document.getElementById('searchPagination').classList.add('d-none');
+    return;
+  }
+  results.innerHTML = '<div class="search-result-item text-muted">Searching...</div>';
+  document.getElementById('searchPagination').classList.add('d-none');
+  fetch(`/api/search?${params.toString()}`)
+    .then(r => r.json())
+    .then(data => {
+      _allResults = data;
+      _currentPage = 1;
+      renderSearchPage();
+    });
+}
+
+function renderSearchPage() {
+  const results = document.getElementById('searchResults');
+  const pagination = document.getElementById('searchPagination');
+  const totalPages = Math.ceil(_allResults.length / SEARCH_PER_PAGE);
+  const start = (_currentPage - 1) * SEARCH_PER_PAGE;
+  const pageItems = _allResults.slice(start, start + SEARCH_PER_PAGE);
+
+  if (!_allResults.length) {
+    results.innerHTML = '<div class="search-result-item text-muted">No results found.</div>';
+    pagination.classList.add('d-none');
+    return;
+  }
+
+  results.innerHTML = pageItems.map(renderResult).join('');
+
+  if (totalPages <= 1) {
+    pagination.classList.add('d-none');
+    return;
+  }
+
+  const end = Math.min(start + SEARCH_PER_PAGE, _allResults.length);
+  document.getElementById('searchPaginationInfo').textContent =
+    `${start + 1}–${end} of ${_allResults.length}`;
+
+  const list = document.getElementById('searchPaginationList');
+  let html = `<li class="page-item${_currentPage === 1 ? ' disabled' : ''}">
+    <a class="page-link" href="#" onclick="goSearchPage(${_currentPage - 1});return false;" aria-label="Previous">
+      <i class="bi bi-chevron-left"></i></a></li>`;
+  for (let p = 1; p <= totalPages; p++) {
+    if (p === 1 || p === totalPages || Math.abs(p - _currentPage) <= 2) {
+      html += `<li class="page-item${p === _currentPage ? ' active' : ''}">
+        <a class="page-link" href="#" onclick="goSearchPage(${p});return false;">${p}</a></li>`;
+    } else if (Math.abs(p - _currentPage) === 3) {
+      html += `<li class="page-item disabled"><span class="page-link">&hellip;</span></li>`;
+    }
+  }
+  html += `<li class="page-item${_currentPage === totalPages ? ' disabled' : ''}">
+    <a class="page-link" href="#" onclick="goSearchPage(${_currentPage + 1});return false;" aria-label="Next">
+      <i class="bi bi-chevron-right"></i></a></li>`;
+  list.innerHTML = html;
+  pagination.classList.remove('d-none');
+}
+
+function goSearchPage(p) {
+  const totalPages = Math.ceil(_allResults.length / SEARCH_PER_PAGE);
+  if (p < 1 || p > totalPages) return;
+  _currentPage = p;
+  renderSearchPage();
+  document.getElementById('searchResults').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function renderResult(result) {
+  const query = document.getElementById('searchQuery').value.trim();
+  if (result.result_type === 'pamphlet') {
+    const location = `${esc(result.series || '')} · p. ${esc(result.page || '')}`;
+    return `<a class="search-result-item" href="/?pamphlet_id=${result.pamphlet_id}&content_mode=sentence">
+      <div class="d-flex justify-content-between gap-2 mb-1">
+        <strong>${location}</strong>
+        <span class="text-muted small">${esc(result.pamphlet_title || '')}</span>
+      </div>
+      <div class="search-result-excerpt topic-snippet mb-1">${esc(makeTextSnippet(result.excerpt || '', query))}</div>
+      <div><span class="badge text-bg-success">pamphlet</span></div>
+    </a>`;
+  }
+  const tags = (result.topics || []).map(t => `<span class="badge text-bg-secondary me-1">${esc(t.name)}</span>`).join('');
+  const location = `${esc(result.chapter_name || '')} · p. ${esc(result.page || '')} · ¶${result.paragraph || ''} · v${result.verse || ''}`;
+  return `<a class="search-result-item" href="/?book_id=${result.book_id}&page=${encodeURIComponent(result.page || '')}&content_mode=sentence">
+    <div class="d-flex justify-content-between gap-2 mb-1">
+      <strong>${location}</strong>
+      <span class="text-muted small">${esc(result.book_title || '')}</span>
+    </div>
+    <div class="search-result-excerpt topic-snippet mb-1">${esc(makeTextSnippet(result.excerpt || '', query))}</div>
+    <div>${tags}<span class="badge text-bg-light">${esc(result.match_type || '')}</span></div>
+  </a>`;
+}
+
+function makeTextSnippet(value, query = '') {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const maxLength = 320;
+  if (text.length <= maxLength) return text;
+
+  const needle = String(query || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (needle) {
+    const index = text.toLowerCase().indexOf(needle);
+    if (index !== -1) {
+      const start = Math.max(0, index - 120);
+      const end = Math.min(text.length, index + needle.length + 180);
+      return formatSnippetSlice(text, start, end);
+    }
+  }
+
+  return `${trimSnippetText(text.slice(0, 220), false, true)} ... ${trimSnippetText(text.slice(-90), true, false)}`;
+}
+
+function formatSnippetSlice(text, start, end, trimStart = start > 0, trimEnd = end < text.length) {
+  const snippet = trimSnippetText(text.slice(start, end), trimStart, trimEnd);
+  return `${start > 0 ? '... ' : ''}${snippet}${end < text.length ? ' ...' : ''}`;
+}
+
+function trimSnippetText(value, trimStart, trimEnd) {
+  let snippet = String(value || '').trim();
+  if (trimStart) {
+    const trimmed = snippet.replace(/^\S+\s+/, '');
+    if (trimmed) snippet = trimmed;
+  }
+  if (trimEnd) {
+    const trimmed = snippet.replace(/\s+\S+$/, '');
+    if (trimmed) snippet = trimmed;
+  }
+  return snippet;
+}
+
+function esc(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'}[ch]));
+}
+</script>
+{% endblock %}

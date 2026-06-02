@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_pagination.html' import render as paginate %}
 {% block title %}Books – BB Study{% endblock %}
 
 {% block content %}
@@ -19,6 +20,7 @@
         <th>Publisher</th>
         <th>Date</th>
         <th>Edition</th>
+        <th>PDF</th>
         <th>Primary</th>
         <th></th>
       </tr>
@@ -32,6 +34,13 @@
         <td>{{ b.publisher or '' }}</td>
         <td>{{ b.publish_date or '' }}</td>
         <td>{{ b.edition or '' }}</td>
+        <td>
+          {% if b.pdf_path %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.book_pdf', book_id=b.id) }}" target="_blank" rel="noopener" title="Open PDF">
+              <i class="bi bi-file-earmark-pdf"></i>
+            </a>
+          {% endif %}
+        </td>
         <td>
           {% if b.is_primary %}
             <span class="badge bg-success"><i class="bi bi-star-fill"></i> Primary</span>
@@ -49,18 +58,19 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="text-muted text-center">No books yet.</td></tr>
+      <tr><td colspan="9" class="text-muted text-center">No books yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{{ paginate(pagination, 'main.books') }}
 
 <!-- Book Modal -->
 <div class="modal fade" id="bookModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="bookModalTitle">Add Book</h5>
+        <h5 class="modal-title" id="bookModalTitle">Add Book <span id="bookEditBadge" class="badge text-bg-warning ms-2 d-none">Editing existing record</span></h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -95,6 +105,10 @@
             <textarea class="form-control form-control-sm" id="bookNotes" rows="3"></textarea>
           </div>
           <div class="col-12">
+            <label class="form-label small">PDF Path</label>
+            <input type="text" class="form-control form-control-sm" id="bookPdfPath" placeholder="books/BigBook-2ed.pdf">
+          </div>
+          <div class="col-12">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="bookIsPrimary">
               <label class="form-check-label" for="bookIsPrimary">Primary study book</label>
@@ -113,8 +127,21 @@
 
 {% block scripts %}
 <script>
+const bookModalEl = document.getElementById('bookModal');
+if (bookModalEl) {
+  bookModalEl.dataset.mode = 'create';
+  bookModalEl.addEventListener('hidden.bs.modal', () => {
+    bookModalEl.dataset.mode = 'create';
+    document.getElementById('bookId').value = '';
+    document.getElementById('bookEditBadge').classList.add('d-none');
+  });
+}
+
 function openBookModal(data) {
-  document.getElementById('bookId').value = data ? data.id : '';
+  const isEdit = !!(data && data.id);
+  bookModalEl.dataset.mode = isEdit ? 'edit' : 'create';
+  document.getElementById('bookId').value = isEdit ? data.id : '';
+  document.getElementById('bookEditBadge').classList.toggle('d-none', !isEdit);
   document.getElementById('bookTitle').value = data ? data.title : '';
   document.getElementById('bookAuthor').value = data ? (data.author || '') : '';
   document.getElementById('bookIsbn').value = data ? (data.isbn || '') : '';
@@ -122,12 +149,14 @@ function openBookModal(data) {
   document.getElementById('bookPublishDate').value = data ? (data.publish_date || '') : '';
   document.getElementById('bookEdition').value = data ? (data.edition || '') : '';
   document.getElementById('bookNotes').value = data ? (data.notes || '') : '';
+  document.getElementById('bookPdfPath').value = data ? (data.pdf_path || '') : '';
   document.getElementById('bookIsPrimary').checked = data ? !!data.is_primary : false;
   document.getElementById('bookModalTitle').textContent = data ? 'Edit Book' : 'Add Book';
 }
 
 function saveBook() {
-  const id = document.getElementById('bookId').value;
+  const id = document.getElementById('bookId').value.trim();
+  const isEdit = bookModalEl.dataset.mode === 'edit' && !!id;
   const payload = {
     title: document.getElementById('bookTitle').value.trim(),
     author: document.getElementById('bookAuthor').value.trim(),
@@ -136,15 +165,18 @@ function saveBook() {
     publish_date: document.getElementById('bookPublishDate').value.trim(),
     edition: document.getElementById('bookEdition').value.trim(),
     notes: document.getElementById('bookNotes').value.trim(),
+    pdf_path: document.getElementById('bookPdfPath').value.trim(),
     is_primary: document.getElementById('bookIsPrimary').checked,
   };
   if (!payload.title) { showAlert('Title is required', 'warning'); return; }
-  const url = id ? `/api/books/${id}` : '/api/books';
-  const method = id ? 'PUT' : 'POST';
+  const url = isEdit ? `/api/books/${id}` : '/api/books';
+  const method = isEdit ? 'PUT' : 'POST';
   fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
     .then(r => r.json())
     .then(res => {
       if (res.error) { showAlert(res.error, 'danger'); return; }
+      document.getElementById('bookId').value = '';
+      bookModalEl.dataset.mode = 'create';
       bootstrap.Modal.getInstance(document.getElementById('bookModal')).hide();
       location.reload();
     });

@@ -1,0 +1,33 @@
+{% macro render(pagination, endpoint, extra_args={}) %}
+{% if pagination and pagination.pages > 1 %}
+{% set start = (pagination.page - 1) * pagination.per_page + 1 %}
+{% set end = pagination.page * pagination.per_page %}
+{% if end > pagination.total %}{% set end = pagination.total %}{% endif %}
+<nav aria-label="Page navigation" class="mt-3">
+  <div class="d-flex flex-column align-items-center gap-1">
+    <ul class="pagination pagination-sm mb-0">
+      <li class="page-item{% if not pagination.has_prev %} disabled{% endif %}">
+        <a class="page-link" href="{{ url_for(endpoint, pg=pagination.prev_num or 1, **extra_args) }}" aria-label="Previous">
+          <i class="bi bi-chevron-left"></i>
+        </a>
+      </li>
+      {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+          <li class="page-item{% if p == pagination.page %} active{% endif %}">
+            <a class="page-link" href="{{ url_for(endpoint, pg=p, **extra_args) }}">{{ p }}</a>
+          </li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+      {% endfor %}
+      <li class="page-item{% if not pagination.has_next %} disabled{% endif %}">
+        <a class="page-link" href="{{ url_for(endpoint, pg=pagination.next_num or pagination.pages, **extra_args) }}" aria-label="Next">
+          <i class="bi bi-chevron-right"></i>
+        </a>
+      </li>
+    </ul>
+    <small class="text-muted">{{ start }}–{{ end }} of {{ pagination.total }}</small>
+  </div>
+</nav>
+{% endif %}
+{% endmacro %}

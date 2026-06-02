@@ -1,12 +1,20 @@
 {% extends 'base.html' %}
+{% from '_pagination.html' import render as paginate %}
 {% block title %}Book Content – BB Study{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-card-text me-1"></i>Book Content</h4>
-  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#contentModal" onclick="openContentModal()">
-    <i class="bi bi-plus-lg me-1"></i>Add Content
-  </button>
+  <div class="d-flex gap-2">
+    {% if selected_book and selected_book.pdf_path %}
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.book_pdf', book_id=selected_book.id) }}" target="_blank" rel="noopener">
+        <i class="bi bi-file-earmark-pdf me-1"></i>Open PDF
+      </a>
+    {% endif %}
+    <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#contentModal" onclick="openContentModal()">
+      <i class="bi bi-plus-lg me-1"></i>Add Content
+    </button>
+  </div>
 </div>
 
 <!-- Filters -->
@@ -26,6 +34,24 @@
            value="{{ page_filter }}" style="width:80px;">
   </div>
   <div class="col-auto">
+    <select name="content_mode" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="sentence" {% if content_mode == 'sentence' %}selected{% endif %}>Sentence / verse</option>
+      <option value="line" {% if content_mode == 'line' %}selected{% endif %}>Book lines</option>
+    </select>
+  </div>
+  {% if toc_entries %}
+  <div class="col-auto">
+    <select class="form-select form-select-sm" onchange="if (this.value) { this.form.page.value = this.value; this.form.submit(); }">
+      <option value="">Table of contents</option>
+      {% for entry in toc_entries %}
+        <option value="{{ entry.page }}" {% if entry.page == page_filter %}selected{% endif %}>
+          {{ entry.chapter_number ~ ' ' if entry.chapter_number else '' }}{{ entry.chapter_name or entry.title }}{% if entry.page %} · {{ entry.page }}{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+  <div class="col-auto">
     <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
   </div>
 </form>
@@ -33,16 +59,18 @@
 <div class="table-responsive">
   <table class="table table-hover align-middle table-sm">
     <thead>
-      <tr><th>Book</th><th>Ch</th><th>Page</th><th>Para</th><th>Line</th><th>Content</th><th></th></tr>
+      <tr><th>Book</th><th>No.</th><th>Chapter</th><th>Page</th><th>Para</th><th>Line</th><th>Verse</th><th>Content</th><th></th></tr>
     </thead>
     <tbody>
       {% for c in content %}
       <tr data-id="{{ c.id }}">
         <td class="text-muted small">{{ c.book.title }}</td>
-        <td>{{ c.chapter or '' }}</td>
+        <td>{{ c.chapter_number or '' }}</td>
+        <td>{{ c.chapter_name or c.chapter or '' }}</td>
         <td>{{ c.page or '' }}</td>
         <td>{{ c.paragraph or '' }}</td>
         <td>{{ c.line or '' }}</td>
+        <td>{{ c.verse or '' }}</td>
         <td>{{ c.content[:100] }}{% if c.content|length > 100 %}…{% endif %}</td>
         <td class="text-end">
           <button class="btn btn-sm btn-outline-primary me-1"
@@ -56,18 +84,25 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="text-muted text-center">No content found.</td></tr>
+      <tr><td colspan="9" class="text-muted text-center">No content found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% if selected_book %}
+{{ paginate(pagination, 'main.book_content', extra_args={
+    'book_id': selected_book.id,
+    'page': page_filter,
+    'content_mode': content_mode
+}) }}
+{% endif %}
 
 <!-- Modal -->
 <div class="modal fade" id="contentModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="contentModalTitle">Add Content</h5>
+        <h5 class="modal-title" id="contentModalTitle">Add Content <span id="contentEditBadge" class="badge text-bg-warning ms-2 d-none">Editing existing record</span></h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -83,6 +118,10 @@
         </div>
         <div class="row g-2 mb-2">
           <div class="col">
+            <label class="form-label small">Chapter No.</label>
+            <input type="text" class="form-control form-control-sm" id="contentChapterNumber">
+          </div>
+          <div class="col">
             <label class="form-label small">Chapter</label>
             <input type="text" class="form-control form-control-sm" id="contentChapter">
           </div>
@@ -97,6 +136,10 @@
           <div class="col">
             <label class="form-label small">Line</label>
             <input type="number" class="form-control form-control-sm" id="contentLine">
+          </div>
+          <div class="col">
+            <label class="form-label small">Verse</label>
+            <input type="number" class="form-control form-control-sm" id="contentVerse">
           </div>
         </div>
         <div>
@@ -115,34 +158,55 @@
 
 {% block scripts %}
 <script>
+const contentModalEl = document.getElementById('contentModal');
+if (contentModalEl) {
+  contentModalEl.dataset.mode = 'create';
+  contentModalEl.addEventListener('hidden.bs.modal', () => {
+    contentModalEl.dataset.mode = 'create';
+    document.getElementById('contentId').value = '';
+    document.getElementById('contentEditBadge').classList.add('d-none');
+  });
+}
+
 function openContentModal(data) {
-  document.getElementById('contentId').value = data ? data.id : '';
+  const isEdit = !!(data && data.id);
+  contentModalEl.dataset.mode = isEdit ? 'edit' : 'create';
+  document.getElementById('contentId').value = isEdit ? data.id : '';
+  document.getElementById('contentEditBadge').classList.toggle('d-none', !isEdit);
   document.getElementById('contentBook').value = data ? data.book_id : '';
-  document.getElementById('contentChapter').value = data ? (data.chapter || '') : '';
+  document.getElementById('contentChapterNumber').value = data ? (data.chapter_number || '') : '';
+  document.getElementById('contentChapter').value = data ? (data.chapter_name || data.chapter || '') : '';
   document.getElementById('contentPage').value = data ? (data.page || '') : '';
   document.getElementById('contentPara').value = data ? (data.paragraph || '') : '';
   document.getElementById('contentLine').value = data ? (data.line || '') : '';
+  document.getElementById('contentVerse').value = data ? (data.verse || '') : '';
   document.getElementById('contentText').value = data ? data.content : '';
   document.getElementById('contentModalTitle').textContent = data ? 'Edit Content' : 'Add Content';
 }
 
 function saveContent() {
-  const id = document.getElementById('contentId').value;
+  const id = document.getElementById('contentId').value.trim();
+  const isEdit = contentModalEl.dataset.mode === 'edit' && !!id;
   const payload = {
     book_id: parseInt(document.getElementById('contentBook').value) || null,
-    chapter: document.getElementById('contentChapter').value.trim(),
+    content_mode: 'fragment',
+    chapter_number: document.getElementById('contentChapterNumber').value.trim(),
+    chapter_name: document.getElementById('contentChapter').value.trim(),
     page: document.getElementById('contentPage').value.trim(),
     paragraph: parseInt(document.getElementById('contentPara').value) || null,
     line: parseInt(document.getElementById('contentLine').value) || null,
+    verse: parseInt(document.getElementById('contentVerse').value) || null,
     content: document.getElementById('contentText').value.trim(),
   };
   if (!payload.book_id || !payload.content) { showAlert('Book and content are required', 'warning'); return; }
-  const url = id ? `/api/book-content/${id}` : '/api/book-content';
-  const method = id ? 'PUT' : 'POST';
+  const url = isEdit ? `/api/book-content/${id}` : '/api/book-content';
+  const method = isEdit ? 'PUT' : 'POST';
   fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
     .then(r => r.json())
     .then(res => {
       if (res.error) { showAlert(res.error, 'danger'); return; }
+      document.getElementById('contentId').value = '';
+      contentModalEl.dataset.mode = 'create';
       bootstrap.Modal.getInstance(document.getElementById('contentModal')).hide();
       location.reload();
     });

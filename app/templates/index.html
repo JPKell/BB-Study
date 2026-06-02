@@ -24,17 +24,90 @@
     <input id="pageInput" type="text" class="form-control form-control-sm" style="width:80px;"
            value="{{ current_page }}" placeholder="Page">
   </div>
+  {% if toc_entries %}
+  <div class="col-auto">
+    <select class="form-select form-select-sm" style="min-width:220px;"
+            onchange="if (this.value) { document.getElementById('pageInput').value = this.value; loadPage(); }">
+      <option value="">Table of contents</option>
+      {% for entry in toc_entries %}
+        <option value="{{ entry.page }}" {% if entry.page == current_page %}selected{% endif %}>
+          {{ entry.chapter_number ~ ' ' if entry.chapter_number else '' }}{{ entry.chapter_name or entry.title }}{% if entry.page %} · {{ entry.page }}{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+  <div class="col-auto">
+    <select id="contentModeSelect" class="form-select form-select-sm" onchange="loadPage()">
+      <option value="sentence" {% if content_mode == 'sentence' %}selected{% endif %}>Sentence / verse</option>
+      <option value="line" {% if content_mode == 'line' %}selected{% endif %}>Book lines</option>
+    </select>
+  </div>
   <div class="col-auto">
     <button class="btn btn-sm btn-primary" id="loadPageBtn">
       <i class="bi bi-arrow-right-circle me-1"></i>Load
     </button>
   </div>
+  <div class="col-auto">
+    <button class="btn btn-sm btn-outline-secondary" id="pamphletPanelToggle" type="button">
+      <i class="bi bi-layout-sidebar-inset me-1"></i>Pamphlets
+    </button>
+  </div>
+  <div class="col-auto position-relative">
+    <div class="input-group input-group-sm" style="width:260px;">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input id="readSearchQuery" type="text" class="form-control" placeholder="Search text or tags">
+    </div>
+    <div id="readSearchResults" class="search-results-dropdown d-none"></div>
+  </div>
+  {% if current_book and current_book.pdf_path %}
+  <div class="col-auto">
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#pdfViewer">
+      <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+    </button>
+  </div>
+  {% endif %}
   {% if current_book %}
   <div class="col-auto ms-auto text-muted small">
     Reading: <strong>{{ current_book.title }}</strong> · Page <strong>{{ current_page }}</strong>
   </div>
   {% endif %}
 </div>
+
+{% if current_book and current_book.pdf_path %}
+<div class="collapse mb-3" id="pdfViewer">
+  <div class="ratio ratio-16x9 border rounded">
+    <iframe src="{{ url_for('main.book_pdf', book_id=current_book.id) }}#page={{ current_page }}"
+            title="{{ current_book.title }} PDF"></iframe>
+  </div>
+</div>
+{% endif %}
+
+<aside id="pamphletPanel" class="pamphlet-reader-panel" aria-label="Pamphlet viewer">
+  <div class="pamphlet-reader-header">
+    <div>
+      <div class="fw-semibold"><i class="bi bi-file-earmark-text me-1"></i>Pamphlets</div>
+      <small class="text-muted" id="pamphletPanelStatus">Search or load a pamphlet</small>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" type="button" id="pamphletPanelClose" aria-label="Close pamphlet viewer">
+      <i class="bi bi-chevron-left"></i>
+    </button>
+  </div>
+  <div class="pamphlet-reader-search">
+    <div class="input-group input-group-sm">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input class="form-control" id="pamphletSearchQuery" type="text" placeholder="Search pamphlets">
+      <button class="btn btn-outline-primary" type="button" id="pamphletSearchBtn">
+        <i class="bi bi-arrow-right"></i>
+      </button>
+    </div>
+    <div id="pamphletSearchResults" class="pamphlet-search-results small"></div>
+  </div>
+  <div class="pamphlet-reader-body">
+    <div class="text-muted small" id="pamphletEmptyState">Choose a pamphlet to view its text beside the book.</div>
+    <div id="pamphletContentView"></div>
+  </div>
+</aside>
 
 <!-- Main reading layout: content left, entry panel right -->
 <div class="row g-3">
@@ -48,25 +121,83 @@
           <i class="bi bi-plus-lg"></i> Add Content
         </button>
       </div>
-      <div class="card-body overflow-auto" style="max-height:60vh;" id="pageContentArea">
+      <div class="card-body overflow-auto" style="max-height:48vh;" id="pageContentArea">
         {% if page_content %}
-          {% set cur_para = namespace(val=None) %}
-          {% for line in page_content %}
-            {% if line.paragraph != cur_para.val %}
-              {% if cur_para.val is not none %}</p>{% endif %}
-              <p class="mb-2" data-paragraph="{{ line.paragraph }}">
-              {% set cur_para.val = line.paragraph %}
-            {% endif %}
-            <span class="d-block line-text" data-line="{{ line.line }}"
-                  data-content-id="{{ line.id }}">{{ line.content }}</span>
-          {% endfor %}
-          {% if page_content %}</p>{% endif %}
+          {% if content_mode == 'line' %}
+            {% set cur_line = namespace(val=None) %}
+            {% set cur_para = namespace(val=None) %}
+            {% for item in page_content %}
+              {% if item.line != cur_line.val %}
+                {% if cur_line.val is not none %}</div>{% endif %}
+                <div class="book-line"
+                     data-line="{{ item.line }}"
+                     data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.line }}</sup>
+                {% set cur_line.val = item.line %}
+                {% set cur_para.val = item.paragraph %}
+              {% endif %}
+              <span class="line-text verse-fragment"
+                    data-content-id="{{ item.id }}"
+                    data-raw-content="{{ item.content }}"
+                    data-verse-key="{{ item.paragraph }}-{{ item.verse }}"
+                    data-chapter="{{ item.chapter_name or item.chapter or '' }}"
+                    data-page="{{ item.page }}"
+                    data-paragraph="{{ item.paragraph }}"
+                    data-line="{{ item.line }}"
+                    data-verse="{{ item.verse }}">{{ item.content }} </span>
+            {% endfor %}
+            {% if page_content %}</div>{% endif %}
+          {% else %}
+            {% set cur_verse = namespace(val='') %}
+            {% set cur_para = namespace(val=None) %}
+            {% for item in page_content %}
+              {% set verse_key = item.paragraph ~ '-' ~ item.verse %}
+              {% if verse_key != cur_verse.val %}
+                {% if cur_verse.val %}</div>{% endif %}
+                <div class="d-block line-text sentence-verse"
+                     data-verse-key="{{ verse_key }}"
+                     data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.verse }}</sup>
+                {% set cur_verse.val = verse_key %}
+                {% set cur_para.val = item.paragraph %}
+              {% endif %}
+              <span class="verse-fragment"
+                    data-content-id="{{ item.id }}"
+                    data-raw-content="{{ item.content }}"
+                    data-verse-key="{{ verse_key }}"
+                    data-chapter="{{ item.chapter_name or item.chapter or '' }}"
+                    data-page="{{ item.page }}"
+                    data-paragraph="{{ item.paragraph }}"
+                    data-line="{{ item.line }}"
+                    data-verse="{{ item.verse }}">{% if item.content.endswith('-') %}{{ item.content[:-1] }}{% else %}{{ item.content }} {% endif %}</span>
+            {% endfor %}
+            {% if page_content %}</div>{% endif %}
+          {% endif %}
         {% elif current_book %}
           <p class="text-muted fst-italic">No content stored for this page yet.</p>
         {% else %}
           <p class="text-muted fst-italic">Select a book and page to begin reading.</p>
         {% endif %}
       </div>
+      {% if current_book %}
+      <div class="card-footer d-flex justify-content-between align-items-center py-2">
+        <div>
+          {% if previous_page %}
+          <a class="btn btn-sm btn-outline-secondary"
+             href="{{ url_for('main.index', book_id=current_book.id, page=previous_page, content_mode=content_mode) }}">
+            <i class="bi bi-arrow-left me-1"></i>Page {{ previous_page }}
+          </a>
+          {% endif %}
+        </div>
+        <span class="text-muted small">Page {{ current_page }}</span>
+        <div>
+          {% if next_page %}
+          <a class="btn btn-sm btn-outline-secondary"
+             href="{{ url_for('main.index', book_id=current_book.id, page=next_page, content_mode=content_mode) }}">
+            Page {{ next_page }}<i class="bi bi-arrow-right ms-1"></i>
+          </a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -91,6 +222,11 @@
             </button>
           </li>
           <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTopic">
+              <i class="bi bi-tags me-1"></i>Topic
+            </button>
+          </li>
+          <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSrc">
               <i class="bi bi-globe me-1"></i>Other Ref
             </button>
@@ -102,6 +238,9 @@
         <!-- Dictionary tab -->
         <div class="tab-pane fade show active" id="tabDict">
           <form id="dictForm" class="mb-0">
+            <input type="hidden" id="dictEntryId">
+            <input type="hidden" id="dictLookupId">
+            <input type="hidden" id="dictLocationId">
             <div class="mb-2">
               <label class="form-label small mb-1">Word / Phrase</label>
               <input type="text" class="form-control form-control-sm" id="dictWord" required>
@@ -136,6 +275,7 @@
         <!-- Book Reference tab -->
         <div class="tab-pane fade" id="tabRef">
           <form id="refForm" class="mb-0">
+            <input type="hidden" id="refId">
             <div class="row g-1 mb-2">
               <div class="col-12">
                 <label class="form-label small mb-1">Source: Chapter / Page / Para / Line</label>
@@ -184,6 +324,7 @@
         <!-- Commentary tab -->
         <div class="tab-pane fade" id="tabComm">
           <form id="commForm" class="mb-0">
+            <input type="hidden" id="commId">
             <div class="row g-1 mb-2">
               <div class="col-12">
                 <label class="form-label small mb-1">Chapter / Page / Para / Line</label>
@@ -199,8 +340,52 @@
               <label class="form-label small mb-1">Commentary</label>
               <textarea class="form-control form-control-sm" id="commText" rows="6" required></textarea>
             </div>
-            <button type="submit" class="btn btn-sm btn-success w-100">
+            <button type="button" class="btn btn-sm btn-success w-100" id="saveCommentaryBtn">
               <i class="bi bi-plus-circle me-1"></i>Save Commentary
+            </button>
+          </form>
+        </div>
+
+        <!-- Topic tab -->
+        <div class="tab-pane fade" id="tabTopic">
+          <form id="topicForm" class="mb-0">
+            <input type="hidden" id="topicLinkId">
+            <input type="hidden" id="topicContentIds">
+            <input type="hidden" id="topicStartContentId">
+            <input type="hidden" id="topicEndContentId">
+            <div class="mb-2">
+              <label class="form-label small mb-1">Topic <span id="topicEditBadge" class="badge text-bg-warning ms-1 d-none">Editing existing tag</span></label>
+              <div class="input-group input-group-sm">
+                <select class="form-select" id="topicSelect">
+                  <option value="">— Select —</option>
+                </select>
+                <input type="text" class="form-control" id="topicNewName" placeholder="New topic">
+              </div>
+            </div>
+            <div class="row g-1 mb-2">
+              <div class="col"><input type="text" class="form-control form-control-sm" id="topicChapter" placeholder="Chapter" readonly></div>
+              <div class="col"><input type="text" class="form-control form-control-sm" id="topicPage" placeholder="Page" readonly></div>
+              <div class="col"><input type="number" class="form-control form-control-sm" id="topicPara" placeholder="Para" readonly></div>
+              <div class="col"><input type="number" class="form-control form-control-sm" id="topicVerse" placeholder="Verse" readonly></div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Selected Text</label>
+              <textarea class="form-control form-control-sm" id="topicSelectedText" rows="3" readonly></textarea>
+            </div>
+            <div class="d-flex gap-2 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-primary flex-fill" id="topicSetEndBtn">
+                <i class="bi bi-cursor me-1"></i>Set End
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="topicClearRangeBtn">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Notes</label>
+              <textarea class="form-control form-control-sm" id="topicNotes" rows="2"></textarea>
+            </div>
+            <button type="submit" class="btn btn-sm btn-success w-100" id="topicSubmitBtn">
+              <i class="bi bi-tag me-1"></i>Apply Topic
             </button>
           </form>
         </div>
@@ -208,6 +393,7 @@
         <!-- Other References tab -->
         <div class="tab-pane fade" id="tabSrc">
           <form id="srcForm" class="mb-0">
+            <input type="hidden" id="srcId">
             <div class="mb-2">
               <label class="form-label small mb-1">Source Name</label>
               <input type="text" class="form-control form-control-sm" id="srcName" required>
@@ -218,6 +404,7 @@
                 <option value="speaker">Speaker</option>
                 <option value="website">Website</option>
                 <option value="magazine">Magazine</option>
+                <option value="pamphlet">Pamphlet</option>
                 <option value="book">Book (other)</option>
                 <option value="other">Other</option>
               </select>
@@ -227,8 +414,8 @@
               <input type="text" class="form-control form-control-sm" id="srcAuthor">
             </div>
             <div class="mb-2">
-              <label class="form-label small mb-1">URL</label>
-              <input type="url" class="form-control form-control-sm" id="srcUrl">
+              <label class="form-label small mb-1">URL / Reference / Identifier</label>
+              <input type="text" class="form-control form-control-sm" id="srcUrl">
             </div>
             <div class="mb-2">
               <label class="form-label small mb-1">Publication / Notes</label>
@@ -304,8 +491,11 @@
 
 {% block scripts %}
 <script>
-const CURRENT_BOOK_ID = {{ current_book.id if current_book else 'null' }};
-const CURRENT_PAGE = {{ ('"' + current_page + '"') if current_page else 'null' }};
+window.BB_STUDY_CONTEXT = {
+  currentBookId: {{ current_book.id if current_book else 'null' }},
+  currentPage: {{ current_page|tojson }},
+  contentMode: {{ content_mode|tojson }},
+};
 </script>
 <script src="{{ url_for('static', filename='js/index.js') }}"></script>
 {% endblock %}

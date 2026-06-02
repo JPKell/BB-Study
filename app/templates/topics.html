@@ -1,0 +1,173 @@
+{% extends 'base.html' %}
+{% from '_pagination.html' import render as paginate %}
+{% block title %}Topics – BB Study{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-tags me-1"></i>Topics</h4>
+  <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#topicModal" onclick="openTopicModal()">
+    <i class="bi bi-plus-lg me-1"></i>Add Topic
+  </button>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle table-sm">
+        <thead>
+          <tr><th>Name</th><th>Description</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for topic in topics %}
+          <tr data-id="{{ topic.id }}">
+            <td><button class="btn btn-link p-0 fw-semibold" onclick="loadTopicIndex({{ topic.id }}, '{{ topic.name|e }}')">{{ topic.name }}</button></td>
+            <td class="small text-muted">{{ topic.description or '' }}</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-primary me-1" onclick='openTopicModal({{ topic.to_dict()|tojson }})'><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-sm btn-outline-danger" onclick="deleteTopic({{ topic.id }})"><i class="bi bi-trash"></i></button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="text-muted text-center">No topics yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {{ paginate(pagination, 'main.topics') }}
+  </div>
+  <div class="col-lg-8">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0" id="indexTitle">Index</h5>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.search') }}"><i class="bi bi-search me-1"></i>Search</a>
+    </div>
+    <div id="topicIndex" class="list-group small">
+      <div class="list-group-item text-muted">Select a topic to see indexed locations.</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="topicModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="topicModalTitle">Add Topic <span id="topicEditBadge" class="badge text-bg-warning ms-2 d-none">Editing existing record</span></h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="topicId">
+        <div class="mb-2">
+          <label class="form-label small">Name *</label>
+          <input type="text" class="form-control form-control-sm" id="topicName">
+        </div>
+        <div>
+          <label class="form-label small">Description</label>
+          <textarea class="form-control form-control-sm" id="topicDescription" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="saveTopic()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const topicModalEl = document.getElementById('topicModal');
+if (topicModalEl) {
+  topicModalEl.dataset.mode = 'create';
+  topicModalEl.addEventListener('hidden.bs.modal', () => {
+    topicModalEl.dataset.mode = 'create';
+    document.getElementById('topicId').value = '';
+    document.getElementById('topicEditBadge').classList.add('d-none');
+  });
+}
+
+function openTopicModal(data) {
+  const isEdit = !!(data && data.id);
+  topicModalEl.dataset.mode = isEdit ? 'edit' : 'create';
+  document.getElementById('topicId').value = isEdit ? data.id : '';
+  document.getElementById('topicEditBadge').classList.toggle('d-none', !isEdit);
+  document.getElementById('topicName').value = data ? data.name : '';
+  document.getElementById('topicDescription').value = data ? (data.description || '') : '';
+  document.getElementById('topicModalTitle').textContent = data ? 'Edit Topic' : 'Add Topic';
+}
+
+function saveTopic() {
+  const id = document.getElementById('topicId').value.trim();
+  const isEdit = topicModalEl.dataset.mode === 'edit' && !!id;
+  const payload = {
+    name: document.getElementById('topicName').value.trim(),
+    description: document.getElementById('topicDescription').value.trim(),
+  };
+  if (!payload.name) { showAlert('Topic name is required', 'warning'); return; }
+  fetch(isEdit ? `/api/topics/${id}` : '/api/topics', {
+    method: isEdit ? 'PUT' : 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  }).then(r => r.json()).then(res => {
+    if (res.error) { showAlert(res.error, 'danger'); return; }
+    document.getElementById('topicId').value = '';
+    topicModalEl.dataset.mode = 'create';
+    bootstrap.Modal.getInstance(document.getElementById('topicModal')).hide();
+    location.reload();
+  });
+}
+
+function deleteTopic(id) {
+  if (!confirm('Delete this topic and its index links?')) return;
+  fetch(`/api/topics/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+
+function loadTopicIndex(topicId, topicName) {
+  document.getElementById('indexTitle').textContent = topicName;
+  const index = document.getElementById('topicIndex');
+  index.innerHTML = '<div class="list-group-item text-muted">Loading...</div>';
+  fetch(`/api/search?topic_id=${topicId}`)
+    .then(r => r.json())
+    .then(results => {
+      if (!results.length) {
+        index.innerHTML = '<div class="list-group-item text-muted">No indexed passages for this topic yet.</div>';
+        return;
+      }
+      index.innerHTML = results.map(renderResult).join('');
+    });
+}
+
+function renderResult(result) {
+  const location = `${esc(result.chapter_name || '')} · p. ${esc(result.page || '')} · ¶${result.paragraph || ''} · v${result.verse || ''}`;
+  return `<a class="list-group-item list-group-item-action" href="/?book_id=${result.book_id}&page=${encodeURIComponent(result.page || '')}&content_mode=sentence">
+    <div class="d-flex justify-content-between gap-2">
+      <strong>${location}</strong>
+      <span class="text-muted">${esc(result.book_title || '')}</span>
+    </div>
+    <div class="topic-snippet">${esc(makeTextSnippet(result.excerpt || ''))}</div>
+  </a>`;
+}
+
+function makeTextSnippet(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= 320) return text;
+  return `${trimSnippetText(text.slice(0, 220), false, true)} ... ${trimSnippetText(text.slice(-90), true, false)}`;
+}
+
+function trimSnippetText(value, trimStart, trimEnd) {
+  let snippet = String(value || '').trim();
+  if (trimStart) {
+    const trimmed = snippet.replace(/^\S+\s+/, '');
+    if (trimmed) snippet = trimmed;
+  }
+  if (trimEnd) {
+    const trimmed = snippet.replace(/\s+\S+$/, '');
+    if (trimmed) snippet = trimmed;
+  }
+  return snippet;
+}
+
+function esc(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'}[ch]));
+}
+</script>
+{% endblock %}
