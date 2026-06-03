@@ -15,6 +15,8 @@ ROMAN_RE = re.compile(r'^(?=[ivxlcdm]+$)[ivxlcdm]+$', re.IGNORECASE)
 PAGE_RE = re.compile(r'^\d+$')
 SENTENCE_RE = re.compile(r'(?<=[.!?])\s+(?=[A-Z"\'(])')
 WORD_RE = re.compile(r'\b[A-Za-z]{2,}\b')
+NON_BREAKING_ABBREVIATIONS = ('A.A.', 'Dr.', 'Mr.', 'Ms.', 'Mrs.')
+ABBREVIATION_TOKEN = '<DOT>'
 KNOWN_TITLES = {
     'preface': 'Preface',
     'foreword to first edition': 'Foreword to First Edition',
@@ -369,15 +371,56 @@ def extract_toc(pages):
     entries.extend(front_entries)
     order += len(front_entries)
 
-    toc_text = '\n'.join(pages[:4])
+    is_service_manual = any('THE A.A. SERVICE MANUAL' in page for page in pages[:4])
+    is_twelve_and_twelve = any('THE TWELVE STEPS' in page for page in pages[:4])
+    toc_pages = 20 if is_service_manual else 12 if is_twelve_and_twelve else 4
+    toc_text = '\n'.join(pages[:toc_pages])
     for raw in toc_text.splitlines():
         line = clean_ocr_spacing(raw)
+        line = re.sub(r'\.{2,}', ' ', line)
+        line = re.sub(r'\s+', ' ', line).strip()
+        if is_twelve_and_twelve:
+            twelve_match = re.match(
+                r'^(FOREWORD|STEP\s+\w+|TRADITION\s+\w+)\s+(\d+)$',
+                line,
+                re.IGNORECASE,
+            )
+            if twelve_match:
+                title = twelve_match.group(1).title()
+                page = twelve_match.group(2)
+                entries.append(TocEntry(order, '', title, title, page))
+                order += 1
+            continue
+        service_match = re.match(
+            r'^(CHAPTER\s+(\d+)|APPENDICES|APPENDIX\s+([A-Z])|MAPS|CONCEPT\s+([IVXLCDM]+)|FOREWORD|INTRODUCTION|GLOSSARY OF GENERAL SERVICE TERMS|GENERAL SERVICE TERMS|INDEX)(?:\s+(.+?))?\s+([A-Z]-[IVXLCDM]+|[ivxlcdm]+|\d+)$',
+            line,
+            re.IGNORECASE,
+        )
+        if service_match:
+            label = service_match.group(1)
+            if label.upper() == 'GENERAL SERVICE TERMS':
+                label = 'GLOSSARY OF GENERAL SERVICE TERMS'
+            chapter_number = service_match.group(2) or service_match.group(3) or service_match.group(4) or ''
+            title = ' '.join(part for part in (label, service_match.group(5) or '') if part)
+            title = re.sub(r'\s+', ' ', title).strip().title()
+            title = title.replace("'S", "'s").replace('Aa Grapevine', 'AA Grapevine')
+            page = service_match.group(6)
+            entries.append(TocEntry(order, chapter_number, label.title(), title, page))
+            order += 1
+            continue
         match = re.match(r'^(?:(\d+)\s+)?(.+?)\s+([ivxlcdm]+|\d+)$', line, re.IGNORECASE)
         if not match:
             continue
         chapter_number, title, page = match.groups()
         title = normalized_title(title)
         if title.lower() in {'chapter', 'page', 'contents'}:
+            continue
+        if toc_pages > 4 and not chapter_number and title.lower() not in {
+            'foreword',
+            'introduction welcome to general service',
+            'glossary of general service terms',
+            'index',
+        }:
             continue
         entries.append(TocEntry(order, chapter_number or '', chapter_number or '', title, page))
         order += 1
@@ -469,8 +512,33 @@ def strip_running_headers(lines, printed_page, chapter):
         cleaned.pop(0)
     if cleaned and clean_ocr_spacing(cleaned[-1]).lower() == str(printed_page).lower():
         cleaned.pop()
+    elif cleaned and re.match(
+        r'^' + re.escape(str(printed_page)) + r'\s+THE A\.A\. SERVICE MANUAL$',
+        clean_ocr_spacing(cleaned[-1]),
+        re.IGNORECASE,
+    ):
+        cleaned.pop()
     elif cleaned and last.endswith(f' {printed_page}'):
         cleaned[-1] = re.sub(r'\s+' + re.escape(str(printed_page)) + r'$', '', cleaned[-1]).rstrip()
+
+    chapter_text = clean_ocr_spacing(chapter).lower()
+    chapter_without_number = re.sub(r'^chapter\s+\d+\s+', '', chapter_text)
+    filtered = []
+    for index, line in enumerate(cleaned):
+        text = clean_ocr_spacing(line)
+        lowered = text.lower()
+        leading_spaces = len(line) - len(line.lstrip(' '))
+        is_edge = index == 0 or index == len(cleaned) - 1
+        if lowered.startswith('table of conten'):
+            continue
+        if chapter_text and lowered == chapter_text and (is_edge or leading_spaces > 24):
+            continue
+        if chapter_without_number and lowered == chapter_without_number:
+            continue
+        if text == 'AAWS' and leading_spaces > 24:
+            continue
+        filtered.append(line)
+    cleaned = filtered
 
     chapter_words = set(re.findall(r'[a-z]+', chapter.lower()))
     if cleaned:
@@ -480,11 +548,27 @@ def strip_running_headers(lines, printed_page, chapter):
     return cleaned
 
 
+def protect_sentence_abbreviations(text):
+    for abbreviation in NON_BREAKING_ABBREVIATIONS:
+        protected = abbreviation.replace('.', ABBREVIATION_TOKEN)
+        text = re.sub(re.escape(abbreviation), protected, text, flags=re.IGNORECASE)
+    return text
+
+
+def restore_sentence_abbreviations(text):
+    return text.replace(ABBREVIATION_TOKEN, '.')
+
+
 def split_sentences(text):
     text = clean_ocr_spacing(text)
     if not text:
         return []
-    return [part.strip() for part in SENTENCE_RE.split(text) if part.strip()]
+    protected = protect_sentence_abbreviations(text)
+    return [
+        restore_sentence_abbreviations(part.strip())
+        for part in SENTENCE_RE.split(protected)
+        if part.strip()
+    ]
 
 
 def repair_wrapped_line_words(lines):
@@ -519,15 +603,16 @@ def paragraph_blocks(lines):
 
 
 def split_line_fragments(line):
+    protected_line = protect_sentence_abbreviations(line)
     parts = []
     start = 0
-    for match in re.finditer(r'[.!?](?=\s+["A-Z]|\s*$)', line):
+    for match in re.finditer(r'[.!?](?=\s+["A-Z]|\s*$)', protected_line):
         end = match.end()
-        fragment = line[start:end].strip()
+        fragment = restore_sentence_abbreviations(protected_line[start:end].strip())
         if fragment:
             parts.append((fragment, True))
         start = end
-    tail = line[start:].strip()
+    tail = restore_sentence_abbreviations(protected_line[start:].strip())
     if tail:
         parts.append((tail, False))
     return parts or [(line, False)]

@@ -6,26 +6,57 @@ const BB_STUDY_CONTEXT = window.BB_STUDY_CONTEXT || {};
 const CURRENT_BOOK_ID = BB_STUDY_CONTEXT.currentBookId || null;
 const CURRENT_PAGE = BB_STUDY_CONTEXT.currentPage || null;
 const CONTENT_MODE = BB_STUDY_CONTEXT.contentMode || 'sentence';
+const SECONDARY_BOOK_ID = BB_STUDY_CONTEXT.secondaryBookId || null;
+const SECONDARY_PAGE = BB_STUDY_CONTEXT.secondaryPage || null;
+const SECONDARY_CONTENT_MODE = BB_STUDY_CONTEXT.secondaryContentMode || 'sentence';
 let currentRefEditId = null;
 let currentCommEditId = null;
 let currentTopicLinkEditId = null;
 let currentSourceEditId = null;
 let topicPickingEnd = false;
+let currentVerseSelection = null;
 const TOPIC_DRAFT_KEY = 'bb-study-topic-draft';
+const BOOK_PANE_TAB_KEY = 'bb-study-active-book-pane-tab';
 const ACTIVE_TAB_KEY = 'bb-study-active-entry-tab';
 
 /* ── Page navigation ───────────────────────────────────────────────────────── */
 
-document.getElementById('loadPageBtn').addEventListener('click', loadPage);
-document.getElementById('pageInput').addEventListener('keydown', e => {
+document.getElementById('pageInput')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') loadPage();
 });
-document.getElementById('bookSelect').addEventListener('change', function () {
+document.getElementById('pageInput')?.addEventListener('change', loadPage);
+document.getElementById('bookSelect')?.addEventListener('change', function () {
   const bookId = this.value;
   if (bookId) {
-    persistSetting('current_book_id', bookId).then(() => location.reload());
+    persistSetting('current_book_id', bookId).then(() => {
+      window.location.href = buildReaderUrl({ bookId, page: null });
+    });
   }
 });
+document.getElementById('primaryTocSelect')?.addEventListener('change', function () {
+  if (!this.value) return;
+  setValue('pageInput', this.value);
+  loadPage();
+});
+document.getElementById('contentModeSelect')?.addEventListener('change', loadPage);
+document.getElementById('secondaryBookSelect')?.addEventListener('change', function () {
+  const bookId = this.value;
+  if (!bookId) return;
+  localStorage.setItem(BOOK_PANE_TAB_KEY, '#secondaryBookPane');
+  persistSetting('current_secondary_book_id', bookId).then(() => {
+    window.location.href = buildReaderUrl({ secondaryBookId: bookId, secondaryPage: null });
+  });
+});
+document.getElementById('secondaryPageInput')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadSecondaryPage();
+});
+document.getElementById('secondaryPageInput')?.addEventListener('change', loadSecondaryPage);
+document.getElementById('secondaryTocSelect')?.addEventListener('change', function () {
+  if (!this.value) return;
+  setValue('secondaryPageInput', this.value);
+  loadSecondaryPage();
+});
+document.getElementById('secondaryContentModeSelect')?.addEventListener('change', loadSecondaryPage);
 document.getElementById('readSearchQuery').addEventListener('keydown', e => {
   if (e.key === 'Enter') runReadSearch();
   if (e.key === 'Escape') hideReadSearchResults();
@@ -38,15 +69,70 @@ document.addEventListener('click', e => {
     hideReadSearchResults();
   }
 });
+document.getElementById('verseBoldBtn')?.addEventListener('click', () => toggleSelectedVerseFormat('bold'));
+document.getElementById('verseItalicBtn')?.addEventListener('click', () => toggleSelectedVerseFormat('italic'));
 
 function loadPage() {
   const page = document.getElementById('pageInput').value.trim();
   if (!page) return;
+  const bookId = document.getElementById('bookSelect')?.value || CURRENT_BOOK_ID;
   const modeSelect = document.getElementById('contentModeSelect');
   const mode = modeSelect ? modeSelect.value : (typeof CONTENT_MODE === 'undefined' ? 'sentence' : CONTENT_MODE);
-  persistSetting('current_page', page).then(() => {
-    window.location.href = `/?content_mode=${encodeURIComponent(mode)}`;
+  Promise.all([
+    persistSetting('current_page', page),
+    bookId ? persistSetting(`book_${bookId}_page`, page) : Promise.resolve(),
+    bookId ? persistSetting(`book_${bookId}_content_mode`, mode) : Promise.resolve(),
+  ]).then(() => {
+    window.location.href = buildReaderUrl({ bookId, page, contentMode: mode });
   });
+}
+
+function loadSecondaryPage() {
+  const bookId = document.getElementById('secondaryBookSelect')?.value || SECONDARY_BOOK_ID;
+  if (!bookId) { showAlert('Select a second book first', 'warning'); return; }
+  const page = document.getElementById('secondaryPageInput')?.value.trim();
+  if (!page) return;
+  const mode = document.getElementById('secondaryContentModeSelect')?.value || SECONDARY_CONTENT_MODE || 'sentence';
+  Promise.all([
+    persistSetting('current_secondary_book_id', bookId),
+    persistSetting(`book_${bookId}_page`, page),
+    persistSetting(`book_${bookId}_content_mode`, mode),
+  ]).then(() => {
+    localStorage.setItem(BOOK_PANE_TAB_KEY, '#secondaryBookPane');
+    window.location.href = buildReaderUrl({ secondaryBookId: bookId, secondaryPage: page, secondaryContentMode: mode });
+  });
+}
+
+function buildReaderUrl(overrides = {}) {
+  const primaryBookId = overrides.bookId !== undefined
+    ? overrides.bookId
+    : (document.getElementById('bookSelect')?.value || CURRENT_BOOK_ID || '');
+  const primaryPage = overrides.page !== undefined
+    ? overrides.page
+    : (document.getElementById('pageInput')?.value.trim() || CURRENT_PAGE || '');
+  const primaryMode = overrides.contentMode !== undefined
+    ? overrides.contentMode
+    : (document.getElementById('contentModeSelect')?.value || CONTENT_MODE || 'sentence');
+
+  const secondaryBookId = overrides.secondaryBookId !== undefined
+    ? overrides.secondaryBookId
+    : (document.getElementById('secondaryBookSelect')?.value || SECONDARY_BOOK_ID || '');
+  const secondaryPage = overrides.secondaryPage !== undefined
+    ? overrides.secondaryPage
+    : (document.getElementById('secondaryPageInput')?.value.trim() || SECONDARY_PAGE || '');
+  const secondaryMode = overrides.secondaryContentMode !== undefined
+    ? overrides.secondaryContentMode
+    : (document.getElementById('secondaryContentModeSelect')?.value || SECONDARY_CONTENT_MODE || 'sentence');
+
+  const params = new URLSearchParams();
+  if (primaryBookId) params.set('book_id', primaryBookId);
+  if (primaryBookId && primaryPage) params.set('page', primaryPage);
+  if (primaryBookId && primaryMode) params.set('content_mode', primaryMode);
+  if (secondaryBookId) params.set('secondary_book_id', secondaryBookId);
+  if (secondaryBookId && secondaryPage) params.set('secondary_page', secondaryPage);
+  if (secondaryBookId && secondaryMode) params.set('secondary_content_mode', secondaryMode);
+  const query = params.toString();
+  return query ? `/?${query}` : '/';
 }
 
 function persistSetting(key, value) {
@@ -114,7 +200,6 @@ function renderSearchResult(result) {
 /* ── Pamphlet side reader ──────────────────────────────────────────────────── */
 
 document.getElementById('pamphletPanelToggle')?.addEventListener('click', () => openPamphletPanel());
-document.getElementById('pamphletPanelClose')?.addEventListener('click', closePamphletPanel);
 document.getElementById('pamphletSearchBtn')?.addEventListener('click', searchPamphlets);
 document.getElementById('pamphletSearchQuery')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') searchPamphlets();
@@ -126,15 +211,16 @@ document.getElementById('pamphletSearchQuery')?.addEventListener('input', e => {
 });
 
 function openPamphletPanel(pamphletId) {
-  const panel = document.getElementById('pamphletPanel');
-  if (!panel) return;
-  panel.classList.add('open');
+  showBookPaneTab('#pamphletBookPane');
   if (!pamphletId) document.querySelector('.pamphlet-reader-search')?.classList.remove('d-none');
   if (pamphletId) loadPamphlet(pamphletId);
 }
 
-function closePamphletPanel() {
-  document.getElementById('pamphletPanel')?.classList.remove('open');
+function showBookPaneTab(target) {
+  const trigger = document.querySelector(`#bookPaneTabs [data-bs-target="${target}"]`);
+  if (!trigger) return;
+  localStorage.setItem(BOOK_PANE_TAB_KEY, target);
+  bootstrap.Tab.getOrCreateInstance(trigger).show();
 }
 
 function searchPamphlets() {
@@ -209,6 +295,7 @@ function loadPageSummary() {
     .then(r => r.json())
     .then(data => {
       summaryEl.innerHTML = '';
+      const summaryCards = [];
 
       // Commentary
       if (data.commentary && data.commentary.length) {
@@ -217,9 +304,9 @@ function loadPageSummary() {
             ['Ch', c.chapter],
             ['Page', c.page],
             ['Para', c.paragraph],
-            ['Line', c.line],
+            ['Verse', c.verse || c.line],
           ]);
-          summaryEl.appendChild(makeSummaryCard('Commentary', 'commentary',
+          summaryCards.push(makeSummaryCard('Commentary', 'commentary',
             `<p class="mb-1">${escHtml(c.commentary_text)}</p>
              ${loc ? `<small class="text-muted">${escHtml(loc)}</small>` : ''}`,
             c.id, 'commentary', 'commentary'));
@@ -229,7 +316,7 @@ function loadPageSummary() {
       // Book references
       if (data.references && data.references.length) {
         data.references.forEach(r => {
-          summaryEl.appendChild(makeSummaryCard('Book Reference', 'reference',
+          summaryCards.push(makeSummaryCard('Book Reference', 'reference',
             `<p class="mb-1 fst-italic">${escHtml(r.quoted_text || '')}</p>
              <p class="mb-0 small">→ <strong>${escHtml(r.target_book_title || '')}</strong>
                Ch: ${escHtml(r.target_chapter || '—')} · Pg: ${escHtml(r.target_page || '—')}</p>
@@ -242,7 +329,7 @@ function loadPageSummary() {
       if (data.sources && data.sources.length) {
         data.sources.forEach(s => {
           const ref = s.url ? `<p class="mb-1">${escHtml(s.url)}</p>` : '';
-          summaryEl.appendChild(makeSummaryCard('Other Ref', 'reference',
+          summaryCards.push(makeSummaryCard('Other Ref', 'reference',
             `<div class="mb-1"><span class="badge text-bg-secondary">${escHtml(s.source_type || 'other')}</span></div>
              <p class="mb-1 fw-semibold">${escHtml(s.name || '')}</p>
              ${ref}
@@ -253,18 +340,14 @@ function loadPageSummary() {
 
       // Dictionary lookups
       if (data.dictionary && data.dictionary.length) {
-        data.dictionary.forEach(d => {
-          summaryEl.appendChild(makeSummaryCard('Dictionary', 'dictionary',
-            `<strong>${escHtml(d.word_phrase || '')}</strong>: ${escHtml(d.meaning || '')}`,
-            d.id, 'dictionary-lookup', 'dictionary'));
-        });
+        summaryCards.push(makeDictionarySummaryCard(data.dictionary));
       }
 
       // Topic tags linked to content on this page
       if (data.topics && data.topics.length) {
         data.topics.forEach(link => {
           const loc = `p. ${escHtml(link.page || '')} · ¶${link.paragraph || ''} · v${link.verse || ''}`;
-          summaryEl.appendChild(makeSummaryCard('Tag', 'reference',
+          summaryCards.push(makeSummaryCard('Tag', 'reference',
             `<div class="mb-1"><span class="badge text-bg-secondary">${escHtml(link.topic_name || '')}</span></div>
              <p class="mb-1 small text-muted">${loc}</p>
              <p class="mb-1 topic-snippet">${escHtml(makeTextSnippet(link.content || ''))}</p>
@@ -273,22 +356,26 @@ function loadPageSummary() {
         });
       }
 
-      if (!summaryEl.children.length) {
-        summaryEl.innerHTML = '<p class="text-muted small col-12">No annotations for this page yet.</p>';
+      if (!summaryCards.length) {
+        summaryEl.innerHTML = '<p class="text-muted small mb-0">No annotations for this page yet.</p>';
+        return;
       }
+      renderBalancedSummaryCards(summaryEl, summaryCards);
     })
     .catch(() => {
       const summaryEl = document.getElementById('pageSummary');
-      if (summaryEl) summaryEl.innerHTML = '<p class="text-danger small col-12">Failed to load page summary.</p>';
+      if (summaryEl) summaryEl.innerHTML = '<p class="text-danger small mb-0">Failed to load page summary.</p>';
     });
 }
 
 function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationType) {
-  const col = document.createElement('div');
-  col.className = 'col-md-6 col-lg-4';
-  col.innerHTML = `
-    <div class="card summary-card ${typeClass} h-100 annotation-card"
-         role="button" tabindex="0" data-annotation-type="${annotationType}" data-id="${id}">
+  const card = document.createElement('div');
+  card.className = `card summary-card ${typeClass} annotation-card`;
+  card.setAttribute('role', 'button');
+  card.setAttribute('tabindex', '0');
+  card.dataset.annotationType = annotationType;
+  card.dataset.id = id;
+  card.innerHTML = `
       <div class="card-header d-flex justify-content-between align-items-center py-1 px-2">
         <small class="fw-semibold text-uppercase">${label}</small>
         <button class="btn btn-sm btn-outline-danger border-0 py-0"
@@ -296,12 +383,85 @@ function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationTyp
           <i class="bi bi-trash"></i>
         </button>
       </div>
-      <div class="card-body py-2 px-2 small">${bodyHtml}</div>
-    </div>`;
-  return col;
+      <div class="card-body py-2 px-2 small">${bodyHtml}</div>`;
+  return card;
+}
+
+function makeDictionarySummaryCard(entries) {
+  const card = document.createElement('div');
+  card.className = 'card summary-card dictionary';
+  const rows = entries.map(entry => `
+    <div class="dictionary-summary-row d-flex align-items-start gap-2">
+      <button class="dictionary-summary-entry text-start flex-grow-1" type="button"
+              data-annotation-type="dictionary" data-id="${entry.id}">
+        <span class="fw-semibold">${escHtml(entry.word_phrase || '')}</span>
+        <span class="text-muted"> — ${escHtml(makeTextSnippet(entry.meaning || '', ''))}</span>
+      </button>
+      <button class="btn btn-sm btn-outline-danger border-0 py-0 dictionary-summary-delete"
+              type="button" data-id="${entry.id}" title="Delete">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>`).join('');
+  card.innerHTML = `
+      <div class="card-header py-1 px-2">
+        <small class="fw-semibold text-uppercase">Dictionary</small>
+      </div>
+      <div class="card-body py-2 px-2 small dictionary-summary-list">${rows}</div>`;
+  return card;
+}
+
+function renderBalancedSummaryCards(summaryEl, cards) {
+  summaryEl.innerHTML = '';
+  const columnCount = getSummaryColumnCount(summaryEl);
+  const columns = Array.from({ length: columnCount }, () => {
+    const column = document.createElement('div');
+    column.className = 'summary-column';
+    summaryEl.appendChild(column);
+    return column;
+  });
+
+  measureSummaryCards(cards, columns[0]).forEach(({ card }) => {
+    const shortestColumn = columns.reduce((shortest, column) =>
+      column.scrollHeight < shortest.scrollHeight ? column : shortest);
+    shortestColumn.appendChild(card);
+  });
+}
+
+function measureSummaryCards(cards, sampleColumn) {
+  const measureColumn = document.createElement('div');
+  measureColumn.className = 'summary-column summary-measure-column';
+  measureColumn.style.width = `${sampleColumn.getBoundingClientRect().width}px`;
+  document.body.appendChild(measureColumn);
+
+  const measured = cards.map(card => {
+    measureColumn.appendChild(card);
+    const height = card.getBoundingClientRect().height;
+    measureColumn.removeChild(card);
+    return { card, height };
+  });
+
+  measureColumn.remove();
+  return measured.sort((a, b) => b.height - a.height);
+}
+
+function getSummaryColumnCount(summaryEl) {
+  const columns = getComputedStyle(summaryEl).gridTemplateColumns
+    .split(' ')
+    .filter(Boolean);
+  return Math.max(1, columns.length || 1);
 }
 
 document.addEventListener('click', e => {
+  const dictionaryDelete = e.target.closest('.dictionary-summary-delete');
+  if (dictionaryDelete) {
+    deleteSummaryItem('dictionary-lookup', dictionaryDelete.dataset.id);
+    return;
+  }
+  const dictionaryEntry = e.target.closest('.dictionary-summary-entry');
+  if (dictionaryEntry) {
+    loadAnnotationIntoEditor(dictionaryEntry.dataset.annotationType, dictionaryEntry.dataset.id);
+    return;
+  }
   const card = e.target.closest('.annotation-card');
   if (!card) return;
   loadAnnotationIntoEditor(card.dataset.annotationType, card.dataset.id);
@@ -321,7 +481,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('commChapter', data.chapter || '');
     setValue('commPage', data.page || CURRENT_PAGE || '');
     setValue('commPara', data.paragraph || '');
-    setValue('commLine', data.line || '');
+    setValue('commLine', data.verse || data.line || '');
     setValue('commText', data.commentary_text || '');
     showTab('#tabComm');
   } else if (type === 'reference') {
@@ -331,12 +491,12 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('refSrcChapter', data.source_chapter || '');
     setValue('refSrcPage', data.source_page || CURRENT_PAGE || '');
     setValue('refSrcPara', data.source_paragraph || '');
-    setValue('refSrcLine', data.source_line || '');
+    setValue('refSrcLine', data.source_verse || data.source_line || '');
     setValue('refTargetBook', data.target_book_id || '');
     setValue('refTgtChapter', data.target_chapter || '');
     setValue('refTgtPage', data.target_page || '');
     setValue('refTgtPara', data.target_paragraph || '');
-    setValue('refTgtLine', data.target_line || '');
+    setValue('refTgtLine', data.target_verse || data.target_line || '');
     setValue('refQuoted', data.quoted_text || '');
     setValue('refComments', data.comments || '');
     showTab('#tabRef');
@@ -468,6 +628,7 @@ document.addEventListener('dblclick', e => {
 
 function selectVerse(fragment) {
   const selection = getVerseSelection(fragment);
+  currentVerseSelection = selection;
   const matches = selection.matches;
   document.querySelectorAll('.verse-fragment.selected-verse').forEach(el => {
     el.classList.remove('selected-verse');
@@ -498,6 +659,7 @@ function selectVerse(fragment) {
   setValue('topicEndContentId', selection.highId || '');
   resetTopicEditor();
   saveTopicDraft();
+  updateVerseFormatButtons(selection);
 }
 
 function getVerseSelection(fragment) {
@@ -515,7 +677,66 @@ function getVerseSelection(fragment) {
     page: fragment.dataset.page || CURRENT_PAGE || '',
     paragraph: fragment.dataset.paragraph || '',
     verse: fragment.dataset.verse || '',
+    isBold: matches.some(el => el.dataset.isBold === 'true' || el.classList.contains('formatted-bold')),
+    isItalic: matches.some(el => el.dataset.isItalic === 'true' || el.classList.contains('formatted-italic')),
   };
+}
+
+function updateVerseFormatButtons(selection = currentVerseSelection) {
+  const boldBtn = document.getElementById('verseBoldBtn');
+  const italicBtn = document.getElementById('verseItalicBtn');
+  if (!boldBtn || !italicBtn) return;
+  const hasSelection = !!selection;
+  boldBtn.disabled = !hasSelection;
+  italicBtn.disabled = !hasSelection;
+  boldBtn.classList.toggle('active', !!selection?.isBold);
+  italicBtn.classList.toggle('active', !!selection?.isItalic);
+}
+
+async function toggleSelectedVerseFormat(kind) {
+  if (!currentVerseSelection || !CURRENT_BOOK_ID) {
+    showAlert('Select a verse first', 'warning');
+    return;
+  }
+  const nextBold = kind === 'bold' ? !currentVerseSelection.isBold : currentVerseSelection.isBold;
+  const nextItalic = kind === 'italic' ? !currentVerseSelection.isItalic : currentVerseSelection.isItalic;
+  const payload = {
+    book_id: CURRENT_BOOK_ID,
+    page: currentVerseSelection.page,
+    paragraph: parseInt(currentVerseSelection.paragraph),
+    verse: parseInt(currentVerseSelection.verse),
+    is_bold: nextBold,
+    is_italic: nextItalic,
+  };
+  const res = await fetch('/api/book-content-formats', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    showAlert('Could not save formatting', 'danger');
+    return;
+  }
+  applyVerseFormatting(currentVerseSelection.matches, nextBold, nextItalic);
+  currentVerseSelection.isBold = nextBold;
+  currentVerseSelection.isItalic = nextItalic;
+  updateVerseFormatButtons(currentVerseSelection);
+}
+
+function applyVerseFormatting(elements, isBold, isItalic) {
+  elements.forEach(el => {
+    el.dataset.isBold = isBold ? 'true' : 'false';
+    el.dataset.isItalic = isItalic ? 'true' : 'false';
+    el.classList.toggle('formatted-bold', isBold);
+    el.classList.toggle('formatted-italic', isItalic);
+    const verse = el.closest('.sentence-verse');
+    if (verse) {
+      verse.dataset.isBold = isBold ? 'true' : 'false';
+      verse.dataset.isItalic = isItalic ? 'true' : 'false';
+      verse.classList.toggle('formatted-bold', isBold);
+      verse.classList.toggle('formatted-italic', isItalic);
+    }
+  });
 }
 
 async function selectTopicRangeEnd(fragment) {
@@ -762,12 +983,12 @@ document.getElementById('refForm').addEventListener('submit', async function (e)
     source_chapter: document.getElementById('refSrcChapter').value.trim(),
     source_page: document.getElementById('refSrcPage').value.trim() || CURRENT_PAGE,
     source_paragraph: parseInt(document.getElementById('refSrcPara').value) || null,
-    source_line: parseInt(document.getElementById('refSrcLine').value) || null,
+    source_verse: parseInt(document.getElementById('refSrcLine').value) || null,
     target_book_id: parseInt(targetBook),
     target_chapter: document.getElementById('refTgtChapter').value.trim(),
     target_page: document.getElementById('refTgtPage').value.trim(),
     target_paragraph: parseInt(document.getElementById('refTgtPara').value) || null,
-    target_line: parseInt(document.getElementById('refTgtLine').value) || null,
+    target_verse: parseInt(document.getElementById('refTgtLine').value) || null,
     quoted_text: document.getElementById('refQuoted').value.trim(),
     comments: document.getElementById('refComments').value.trim(),
   };
@@ -806,7 +1027,7 @@ async function saveCommentary() {
     chapter: document.getElementById('commChapter').value.trim(),
     page: document.getElementById('commPage').value.trim() || CURRENT_PAGE,
     paragraph: parseInt(document.getElementById('commPara').value) || null,
-    line: parseInt(document.getElementById('commLine').value) || null,
+    verse: parseInt(document.getElementById('commLine').value) || null,
     commentary_text: text,
   };
 
@@ -1072,6 +1293,7 @@ document.getElementById('saveContentBtn').addEventListener('click', async functi
 /* ── Pre-populate page field in entry forms ─────────────────────────────────── */
 
 document.addEventListener('DOMContentLoaded', () => {
+  updateVerseFormatButtons();
   if (CURRENT_PAGE) {
     ['dictPage', 'refSrcPage', 'commPage'].forEach(id => {
       const el = document.getElementById(id);
@@ -1091,6 +1313,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (target) localStorage.setItem(ACTIVE_TAB_KEY, target);
     });
   });
+  document.querySelectorAll('#bookPaneTabs [data-bs-toggle="tab"]').forEach(tab => {
+    tab.addEventListener('shown.bs.tab', event => {
+      const target = event.target.getAttribute('data-bs-target');
+      if (target) localStorage.setItem(BOOK_PANE_TAB_KEY, target);
+    });
+  });
+  const activeBookPaneTarget = localStorage.getItem(BOOK_PANE_TAB_KEY);
+  if (activeBookPaneTarget) {
+    const trigger = document.querySelector(`#bookPaneTabs [data-bs-target="${activeBookPaneTarget}"]`);
+    if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+  }
   const activeTarget = localStorage.getItem(ACTIVE_TAB_KEY);
   if (activeTarget) {
     const trigger = document.querySelector(`#entryTabs [data-bs-target="${activeTarget}"]`);

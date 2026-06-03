@@ -1,207 +1,329 @@
 {% extends 'base.html' %}
 {% block title %}Read – BB Study{% endblock %}
 
-{% block content %}
-<!-- Book / Page selector bar -->
-<div class="row g-2 mb-3 align-items-center">
-  <div class="col-auto">
-    <label class="col-form-label fw-semibold"><i class="bi bi-book me-1"></i>Book</label>
-  </div>
-  <div class="col-auto">
-    <select id="bookSelect" class="form-select form-select-sm" style="min-width:220px;">
-      <option value="">— Select a book —</option>
-      {% for b in books %}
-        <option value="{{ b.id }}" {% if current_book and current_book.id == b.id %}selected{% endif %}>
-          {{ b.title }}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="col-auto">
-    <label class="col-form-label fw-semibold"><i class="bi bi-file-earmark me-1"></i>Page</label>
-  </div>
-  <div class="col-auto">
-    <input id="pageInput" type="text" class="form-control form-control-sm" style="width:80px;"
-           value="{{ current_page }}" placeholder="Page">
-  </div>
-  {% if toc_entries %}
-  <div class="col-auto">
-    <select class="form-select form-select-sm" style="min-width:220px;"
-            onchange="if (this.value) { document.getElementById('pageInput').value = this.value; loadPage(); }">
-      <option value="">Table of contents</option>
-      {% for entry in toc_entries %}
-        <option value="{{ entry.page }}" {% if entry.page == current_page %}selected{% endif %}>
-          {{ entry.chapter_number ~ ' ' if entry.chapter_number else '' }}{{ entry.chapter_name or entry.title }}{% if entry.page %} · {{ entry.page }}{% endif %}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-  {% endif %}
-  <div class="col-auto">
-    <select id="contentModeSelect" class="form-select form-select-sm" onchange="loadPage()">
-      <option value="sentence" {% if content_mode == 'sentence' %}selected{% endif %}>Sentence / verse</option>
-      <option value="line" {% if content_mode == 'line' %}selected{% endif %}>Book lines</option>
-    </select>
-  </div>
-  <div class="col-auto">
-    <button class="btn btn-sm btn-primary" id="loadPageBtn">
-      <i class="bi bi-arrow-right-circle me-1"></i>Load
-    </button>
-  </div>
-  <div class="col-auto">
-    <button class="btn btn-sm btn-outline-secondary" id="pamphletPanelToggle" type="button">
-      <i class="bi bi-layout-sidebar-inset me-1"></i>Pamphlets
-    </button>
-  </div>
-  <div class="col-auto position-relative">
+{% block navbar_tools %}
+<div class="d-flex align-items-center gap-2 my-2 my-lg-0 me-lg-2">
+  <div class="position-relative">
     <div class="input-group input-group-sm" style="width:260px;">
       <span class="input-group-text"><i class="bi bi-search"></i></span>
       <input id="readSearchQuery" type="text" class="form-control" placeholder="Search text or tags">
     </div>
     <div id="readSearchResults" class="search-results-dropdown d-none"></div>
   </div>
-  {% if current_book and current_book.pdf_path %}
-  <div class="col-auto">
-    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#pdfViewer">
-      <i class="bi bi-file-earmark-pdf me-1"></i>PDF
-    </button>
-  </div>
-  {% endif %}
-  {% if current_book %}
-  <div class="col-auto ms-auto text-muted small">
-    Reading: <strong>{{ current_book.title }}</strong> · Page <strong>{{ current_page }}</strong>
-  </div>
-  {% endif %}
 </div>
+{% endblock %}
 
-{% if current_book and current_book.pdf_path %}
-<div class="collapse mb-3" id="pdfViewer">
-  <div class="ratio ratio-16x9 border rounded">
-    <iframe src="{{ url_for('main.book_pdf', book_id=current_book.id) }}#page={{ current_page }}"
-            title="{{ current_book.title }} PDF"></iframe>
-  </div>
-</div>
-{% endif %}
-
-<aside id="pamphletPanel" class="pamphlet-reader-panel" aria-label="Pamphlet viewer">
-  <div class="pamphlet-reader-header">
-    <div>
-      <div class="fw-semibold"><i class="bi bi-file-earmark-text me-1"></i>Pamphlets</div>
-      <small class="text-muted" id="pamphletPanelStatus">Search or load a pamphlet</small>
-    </div>
-    <button class="btn btn-sm btn-outline-secondary" type="button" id="pamphletPanelClose" aria-label="Close pamphlet viewer">
-      <i class="bi bi-chevron-left"></i>
-    </button>
-  </div>
-  <div class="pamphlet-reader-search">
-    <div class="input-group input-group-sm">
-      <span class="input-group-text"><i class="bi bi-search"></i></span>
-      <input class="form-control" id="pamphletSearchQuery" type="text" placeholder="Search pamphlets">
-      <button class="btn btn-outline-primary" type="button" id="pamphletSearchBtn">
-        <i class="bi bi-arrow-right"></i>
-      </button>
-    </div>
-    <div id="pamphletSearchResults" class="pamphlet-search-results small"></div>
-  </div>
-  <div class="pamphlet-reader-body">
-    <div class="text-muted small" id="pamphletEmptyState">Choose a pamphlet to view its text beside the book.</div>
-    <div id="pamphletContentView"></div>
-  </div>
-</aside>
-
-<!-- Main reading layout: content left, entry panel right -->
+{% block content %}
 <div class="row g-3">
-
-  <!-- LEFT: page content -->
   <div class="col-lg-7">
     <div class="card h-100">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-card-text me-1"></i>Page Content</span>
+        <ul class="nav nav-tabs card-header-tabs" id="bookPaneTabs">
+          <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#primaryBookPane">
+              <i class="bi bi-book me-1"></i>Primary
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#secondaryBookPane">
+              <i class="bi bi-book-half me-1"></i>Second Book
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pamphletBookPane">
+              <i class="bi bi-file-earmark-text me-1"></i>Pamphlets
+            </button>
+          </li>
+        </ul>
         <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#addContentModal">
           <i class="bi bi-plus-lg"></i> Add Content
         </button>
       </div>
-      <div class="card-body overflow-auto" style="max-height:48vh;" id="pageContentArea">
-        {% if page_content %}
-          {% if content_mode == 'line' %}
-            {% set cur_line = namespace(val=None) %}
-            {% set cur_para = namespace(val=None) %}
-            {% for item in page_content %}
-              {% if item.line != cur_line.val %}
-                {% if cur_line.val is not none %}</div>{% endif %}
-                <div class="book-line"
-                     data-line="{{ item.line }}"
-                     data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.line }}</sup>
-                {% set cur_line.val = item.line %}
-                {% set cur_para.val = item.paragraph %}
+      <div class="card-body tab-content book-pane-body">
+        <div class="tab-pane fade show active" id="primaryBookPane">
+          <div class="reader-controls row g-2 align-items-center mb-2">
+            <div class="col-12 col-md">
+              <select id="bookSelect" class="form-select form-select-sm">
+                <option value="">— Select a book —</option>
+                {% for b in books %}
+                  <option value="{{ b.id }}" {% if current_book and current_book.id == b.id %}selected{% endif %}>
+                    {{ b.title }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-auto">
+              <input id="pageInput" type="text" class="form-control form-control-sm" style="width:80px;"
+                     value="{{ current_page }}" placeholder="Page">
+            </div>
+            {% if toc_entries %}
+            <div class="col-12 col-md">
+              <select id="primaryTocSelect" class="form-select form-select-sm">
+                <option value="">Table of contents</option>
+                {% for entry in toc_entries %}
+                  <option value="{{ entry.page }}" {% if entry.page == current_page %}selected{% endif %}>
+                    {{ entry.chapter_number ~ ' ' if entry.chapter_number else '' }}{{ entry.chapter_name or entry.title }}{% if entry.page %} · {{ entry.page }}{% endif %}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            {% endif %}
+            <div class="col-auto">
+              <select id="contentModeSelect" class="form-select form-select-sm">
+                <option value="sentence" {% if content_mode == 'sentence' %}selected{% endif %}>Sentence / verse</option>
+                <option value="line" {% if content_mode == 'line' %}selected{% endif %}>Book lines</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <div class="btn-group btn-group-sm" role="group" aria-label="Verse formatting">
+                <button class="btn btn-outline-secondary" id="verseBoldBtn" type="button" title="Bold selected verse">
+                  <i class="bi bi-type-bold"></i>
+                </button>
+                <button class="btn btn-outline-secondary" id="verseItalicBtn" type="button" title="Italic selected verse">
+                  <i class="bi bi-type-italic"></i>
+                </button>
+              </div>
+            </div>
+            <div class="col-auto">
+              {% if current_book and current_book.pdf_path %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.book_pdf', book_id=current_book.id) }}" target="_blank" rel="noopener">
+                  <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                </a>
               {% endif %}
-              <span class="line-text verse-fragment"
-                    data-content-id="{{ item.id }}"
-                    data-raw-content="{{ item.content }}"
-                    data-verse-key="{{ item.paragraph }}-{{ item.verse }}"
-                    data-chapter="{{ item.chapter_name or item.chapter or '' }}"
-                    data-page="{{ item.page }}"
-                    data-paragraph="{{ item.paragraph }}"
-                    data-line="{{ item.line }}"
-                    data-verse="{{ item.verse }}">{{ item.content }} </span>
-            {% endfor %}
-            {% if page_content %}</div>{% endif %}
-          {% else %}
-            {% set cur_verse = namespace(val='') %}
-            {% set cur_para = namespace(val=None) %}
-            {% for item in page_content %}
-              {% set verse_key = item.paragraph ~ '-' ~ item.verse %}
-              {% if verse_key != cur_verse.val %}
-                {% if cur_verse.val %}</div>{% endif %}
-                <div class="d-block line-text sentence-verse"
-                     data-verse-key="{{ verse_key }}"
-                     data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.verse }}</sup>
-                {% set cur_verse.val = verse_key %}
-                {% set cur_para.val = item.paragraph %}
+            </div>
+            <div class="col-auto">
+              {% if current_book %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.export_page_pdf', book_id=current_book.id, page=current_page) }}" target="_blank" rel="noopener">
+                  <i class="bi bi-box-arrow-up-right me-1"></i>Export
+                </a>
               {% endif %}
-              <span class="verse-fragment"
-                    data-content-id="{{ item.id }}"
-                    data-raw-content="{{ item.content }}"
-                    data-verse-key="{{ verse_key }}"
-                    data-chapter="{{ item.chapter_name or item.chapter or '' }}"
-                    data-page="{{ item.page }}"
-                    data-paragraph="{{ item.paragraph }}"
-                    data-line="{{ item.line }}"
-                    data-verse="{{ item.verse }}">{% if item.content.endswith('-') %}{{ item.content[:-1] }}{% else %}{{ item.content }} {% endif %}</span>
-            {% endfor %}
-            {% if page_content %}</div>{% endif %}
-          {% endif %}
-        {% elif current_book %}
-          <p class="text-muted fst-italic">No content stored for this page yet.</p>
-        {% else %}
-          <p class="text-muted fst-italic">Select a book and page to begin reading.</p>
-        {% endif %}
-      </div>
-      {% if current_book %}
-      <div class="card-footer d-flex justify-content-between align-items-center py-2">
-        <div>
-          {% if previous_page %}
-          <a class="btn btn-sm btn-outline-secondary"
-             href="{{ url_for('main.index', book_id=current_book.id, page=previous_page, content_mode=content_mode) }}">
-            <i class="bi bi-arrow-left me-1"></i>Page {{ previous_page }}
-          </a>
+            </div>
+          </div>
+          <div class="book-content-scroll" id="pageContentArea">
+            {% if page_content %}
+              {% if content_mode == 'line' %}
+                {% set cur_line = namespace(val=None) %}
+                {% set cur_para = namespace(val=None) %}
+                {% for item in page_content %}
+                  {% if item.line != cur_line.val %}
+                    {% if cur_line.val is not none %}</div>{% endif %}
+                    <div class="book-line"
+                         data-line="{{ item.line }}"
+                         data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.line }}</sup>
+                    {% set cur_line.val = item.line %}
+                    {% set cur_para.val = item.paragraph %}
+                  {% endif %}
+                  {% set fmt = content_formats.get(item.paragraph ~ '-' ~ item.verse) %}
+                  <span class="line-text verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }}"
+                        data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
+                        data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
+                        data-content-id="{{ item.id }}"
+                        data-raw-content="{{ item.content }}"
+                        data-verse-key="{{ item.paragraph }}-{{ item.verse }}"
+                        data-chapter="{{ item.chapter_name or item.chapter or '' }}"
+                        data-page="{{ item.page }}"
+                        data-paragraph="{{ item.paragraph }}"
+                        data-line="{{ item.line }}"
+                        data-verse="{{ item.verse }}">{{ item.content }} </span>
+                {% endfor %}
+                {% if page_content %}</div>{% endif %}
+              {% else %}
+                {% set cur_verse = namespace(val='') %}
+                {% set cur_para = namespace(val=None) %}
+                {% for item in page_content %}
+                  {% set verse_key = item.paragraph ~ '-' ~ item.verse %}
+                  {% if verse_key != cur_verse.val %}
+                    {% if cur_verse.val %}</div>{% endif %}
+                    {% set fmt = content_formats.get(verse_key) %}
+                    <div class="d-block line-text sentence-verse {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }}"
+                         data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
+                         data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
+                         data-verse-key="{{ verse_key }}"
+                         data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.verse }}</sup>
+                    {% set cur_verse.val = verse_key %}
+                    {% set cur_para.val = item.paragraph %}
+                  {% endif %}
+                  {% set fmt = content_formats.get(verse_key) %}
+                  <span class="verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }}"
+                        data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
+                        data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
+                        data-content-id="{{ item.id }}"
+                        data-raw-content="{{ item.content }}"
+                        data-verse-key="{{ verse_key }}"
+                        data-chapter="{{ item.chapter_name or item.chapter or '' }}"
+                        data-page="{{ item.page }}"
+                        data-paragraph="{{ item.paragraph }}"
+                        data-line="{{ item.line }}"
+                        data-verse="{{ item.verse }}">{% if item.content.endswith('-') %}{{ item.content[:-1] }}{% else %}{{ item.content }} {% endif %}</span>
+                {% endfor %}
+                {% if page_content %}</div>{% endif %}
+              {% endif %}
+            {% elif current_book %}
+              <p class="text-muted fst-italic">No content stored for this page yet.</p>
+            {% else %}
+              <p class="text-muted fst-italic">Select a book and page to begin reading.</p>
+            {% endif %}
+          </div>
+          {% if current_book %}
+          <div class="reader-footer d-flex justify-content-between align-items-center mt-2">
+            <div>
+              {% if previous_page %}
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ url_for('main.index', book_id=current_book.id, page=previous_page, content_mode=content_mode, secondary_book_id=secondary_book.id if secondary_book else none, secondary_page=secondary_page if secondary_book else none, secondary_content_mode=secondary_content_mode if secondary_book else none) }}">
+                <i class="bi bi-arrow-left me-1"></i>Page {{ previous_page }}
+              </a>
+              {% endif %}
+            </div>
+            <div>
+              {% if next_page %}
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ url_for('main.index', book_id=current_book.id, page=next_page, content_mode=content_mode, secondary_book_id=secondary_book.id if secondary_book else none, secondary_page=secondary_page if secondary_book else none, secondary_content_mode=secondary_content_mode if secondary_book else none) }}">
+                Page {{ next_page }}<i class="bi bi-arrow-right ms-1"></i>
+              </a>
+              {% endif %}
+            </div>
+          </div>
           {% endif %}
         </div>
-        <span class="text-muted small">Page {{ current_page }}</span>
-        <div>
-          {% if next_page %}
-          <a class="btn btn-sm btn-outline-secondary"
-             href="{{ url_for('main.index', book_id=current_book.id, page=next_page, content_mode=content_mode) }}">
-            Page {{ next_page }}<i class="bi bi-arrow-right ms-1"></i>
-          </a>
+
+        <div class="tab-pane fade" id="secondaryBookPane">
+          <div class="reader-controls row g-2 align-items-center mb-2">
+            <div class="col-12 col-md">
+              <select id="secondaryBookSelect" class="form-select form-select-sm">
+                <option value="">— Select second book —</option>
+                {% for b in books %}
+                  <option value="{{ b.id }}" {% if secondary_book and secondary_book.id == b.id %}selected{% endif %}>
+                    {{ b.title }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-auto">
+              <input id="secondaryPageInput" type="text" class="form-control form-control-sm" style="width:80px;"
+                     value="{{ secondary_page }}" placeholder="Page">
+            </div>
+            {% if secondary_toc_entries %}
+            <div class="col-12 col-md">
+              <select id="secondaryTocSelect" class="form-select form-select-sm">
+                <option value="">Table of contents</option>
+                {% for entry in secondary_toc_entries %}
+                  <option value="{{ entry.page }}" {% if entry.page == secondary_page %}selected{% endif %}>
+                    {{ entry.chapter_number ~ ' ' if entry.chapter_number else '' }}{{ entry.chapter_name or entry.title }}{% if entry.page %} · {{ entry.page }}{% endif %}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            {% endif %}
+            <div class="col-auto">
+              <select id="secondaryContentModeSelect" class="form-select form-select-sm">
+                <option value="sentence" {% if secondary_content_mode == 'sentence' %}selected{% endif %}>Sentence / verse</option>
+                <option value="line" {% if secondary_content_mode == 'line' %}selected{% endif %}>Book lines</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              {% if secondary_book and secondary_book.pdf_path %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.book_pdf', book_id=secondary_book.id) }}" target="_blank" rel="noopener">
+                  <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                </a>
+              {% endif %}
+            </div>
+          </div>
+          <div class="book-content-scroll" id="secondaryBookContentArea">
+            {% if secondary_book %}
+              {% if secondary_page_content %}
+                {% if secondary_content_mode == 'line' %}
+                  {% set sec_line = namespace(val=None) %}
+                  {% set sec_para = namespace(val=None) %}
+                  {% for item in secondary_page_content %}
+                    {% if item.line != sec_line.val %}
+                      {% if sec_line.val is not none %}</div>{% endif %}
+                      <div class="book-line"
+                           data-line="{{ item.line }}"
+                           data-paragraph-start="{{ 'true' if item.paragraph != sec_para.val else 'false' }}"><sup class="content-number">{{ item.line }}</sup>
+                      {% set sec_line.val = item.line %}
+                      {% set sec_para.val = item.paragraph %}
+                    {% endif %}
+                    <span class="line-text secondary-book-fragment"
+                          data-content-id="{{ item.id }}"
+                          data-raw-content="{{ item.content }}">{{ item.content }} </span>
+                  {% endfor %}
+                  {% if secondary_page_content %}</div>{% endif %}
+                {% else %}
+                  {% set sec_verse = namespace(val='') %}
+                  {% set sec_para = namespace(val=None) %}
+                  {% for item in secondary_page_content %}
+                    {% set verse_key = item.paragraph ~ '-' ~ item.verse %}
+                    {% if verse_key != sec_verse.val %}
+                      {% if sec_verse.val %}</div>{% endif %}
+                      <div class="d-block line-text sentence-verse"
+                           data-verse-key="{{ verse_key }}"
+                           data-paragraph-start="{{ 'true' if item.paragraph != sec_para.val else 'false' }}"><sup class="content-number">{{ item.verse }}</sup>
+                      {% set sec_verse.val = verse_key %}
+                      {% set sec_para.val = item.paragraph %}
+                    {% endif %}
+                    <span class="secondary-book-fragment"
+                          data-content-id="{{ item.id }}"
+                          data-raw-content="{{ item.content }}">{% if item.content.endswith('-') %}{{ item.content[:-1] }}{% else %}{{ item.content }} {% endif %}</span>
+                  {% endfor %}
+                  {% if secondary_page_content %}</div>{% endif %}
+                {% endif %}
+              {% else %}
+                <p class="text-muted fst-italic">No content stored for this page yet.</p>
+              {% endif %}
+            {% else %}
+              <p class="text-muted fst-italic">Select a second book to read here.</p>
+            {% endif %}
+          </div>
+          {% if secondary_book %}
+          <div class="reader-footer d-flex justify-content-between align-items-center mt-2">
+            <div>
+              {% if secondary_previous_page %}
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ url_for('main.index', book_id=current_book.id if current_book else none, page=current_page if current_book else none, content_mode=content_mode if current_book else none, secondary_book_id=secondary_book.id, secondary_page=secondary_previous_page, secondary_content_mode=secondary_content_mode) }}">
+                <i class="bi bi-arrow-left me-1"></i>Page {{ secondary_previous_page }}
+              </a>
+              {% endif %}
+            </div>
+            <div>
+              {% if secondary_next_page %}
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ url_for('main.index', book_id=current_book.id if current_book else none, page=current_page if current_book else none, content_mode=content_mode if current_book else none, secondary_book_id=secondary_book.id, secondary_page=secondary_next_page, secondary_content_mode=secondary_content_mode) }}">
+                Page {{ secondary_next_page }}<i class="bi bi-arrow-right ms-1"></i>
+              </a>
+              {% endif %}
+            </div>
+          </div>
           {% endif %}
         </div>
+
+        <div class="tab-pane fade" id="pamphletBookPane">
+          <div class="pamphlet-reader-pane" aria-label="Pamphlet viewer">
+            <div class="pamphlet-reader-header">
+              <div>
+                <div class="fw-semibold"><i class="bi bi-file-earmark-text me-1"></i>Pamphlets</div>
+                <small class="text-muted" id="pamphletPanelStatus">Search or load a pamphlet</small>
+              </div>
+            </div>
+            <div class="pamphlet-reader-search">
+              <div class="input-group input-group-sm">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input class="form-control" id="pamphletSearchQuery" type="text" placeholder="Search pamphlets">
+                <button class="btn btn-outline-primary" type="button" id="pamphletSearchBtn">
+                  <i class="bi bi-arrow-right"></i>
+                </button>
+              </div>
+              <div id="pamphletSearchResults" class="pamphlet-search-results small"></div>
+            </div>
+            <div class="pamphlet-reader-body">
+              <div class="text-muted small" id="pamphletEmptyState">Choose a pamphlet to view its text beside the book.</div>
+              <div id="pamphletContentView"></div>
+            </div>
+          </div>
+        </div>
       </div>
-      {% endif %}
     </div>
   </div>
 
-  <!-- RIGHT: entry panel -->
   <div class="col-lg-5">
     <div class="card h-100">
       <div class="card-header">
@@ -234,7 +356,6 @@
         </ul>
       </div>
       <div class="card-body tab-content overflow-auto" style="max-height:60vh;">
-
         <!-- Dictionary tab -->
         <div class="tab-pane fade show active" id="tabDict">
           <form id="dictForm" class="mb-0">
@@ -250,7 +371,7 @@
               <textarea class="form-control form-control-sm" id="dictMeaning" rows="3" required></textarea>
             </div>
             <div class="mb-2">
-              <label class="form-label small mb-1">Chapter / Page / Para / Line</label>
+              <label class="form-label small mb-1">Chapter / Page / Para / Verse</label>
               <div class="row g-1">
                 <div class="col"><input type="text" class="form-control form-control-sm" id="dictChapter" placeholder="Chapter"></div>
                 <div class="col"><input type="text" class="form-control form-control-sm" id="dictPage" placeholder="Page"></div>
@@ -278,12 +399,12 @@
             <input type="hidden" id="refId">
             <div class="row g-1 mb-2">
               <div class="col-12">
-                <label class="form-label small mb-1">Source: Chapter / Page / Para / Line</label>
+              <label class="form-label small mb-1">Source: Chapter / Page / Para / Verse</label>
                 <div class="row g-1">
                   <div class="col"><input type="text" class="form-control form-control-sm" id="refSrcChapter" placeholder="Ch"></div>
                   <div class="col"><input type="text" class="form-control form-control-sm" id="refSrcPage" placeholder="Page"></div>
                   <div class="col"><input type="number" class="form-control form-control-sm" id="refSrcPara" placeholder="Para"></div>
-                  <div class="col"><input type="number" class="form-control form-control-sm" id="refSrcLine" placeholder="Line"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="refSrcLine" placeholder="Verse"></div>
                 </div>
               </div>
             </div>
@@ -298,12 +419,12 @@
             </div>
             <div class="row g-1 mb-2">
               <div class="col-12">
-                <label class="form-label small mb-1">Target: Chapter / Page / Para / Line</label>
+              <label class="form-label small mb-1">Target: Chapter / Page / Para / Verse</label>
                 <div class="row g-1">
                   <div class="col"><input type="text" class="form-control form-control-sm" id="refTgtChapter" placeholder="Ch"></div>
                   <div class="col"><input type="text" class="form-control form-control-sm" id="refTgtPage" placeholder="Page"></div>
                   <div class="col"><input type="number" class="form-control form-control-sm" id="refTgtPara" placeholder="Para"></div>
-                  <div class="col"><input type="number" class="form-control form-control-sm" id="refTgtLine" placeholder="Line"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="refTgtLine" placeholder="Verse"></div>
                 </div>
               </div>
             </div>
@@ -327,12 +448,12 @@
             <input type="hidden" id="commId">
             <div class="row g-1 mb-2">
               <div class="col-12">
-                <label class="form-label small mb-1">Chapter / Page / Para / Line</label>
+                <label class="form-label small mb-1">Chapter / Page / Para / Verse</label>
                 <div class="row g-1">
                   <div class="col"><input type="text" class="form-control form-control-sm" id="commChapter" placeholder="Ch"></div>
                   <div class="col"><input type="text" class="form-control form-control-sm" id="commPage" placeholder="Page"></div>
                   <div class="col"><input type="number" class="form-control form-control-sm" id="commPara" placeholder="Para"></div>
-                  <div class="col"><input type="number" class="form-control form-control-sm" id="commLine" placeholder="Line"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="commLine" placeholder="Verse"></div>
                 </div>
               </div>
             </div>
@@ -427,11 +548,11 @@
           </form>
         </div>
 
-      </div><!-- /tab-content -->
-    </div><!-- /card -->
-  </div><!-- /col -->
 
-</div><!-- /row -->
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Page summary section (loaded dynamically) -->
 <div class="mt-4" id="pageSummarySection">
@@ -439,7 +560,7 @@
   <h5 class="border-bottom pb-2">
     <i class="bi bi-layers me-1"></i>All annotations for page <span id="summaryPageLabel">{{ current_page }}</span>
   </h5>
-  <div id="pageSummary" class="row g-3">
+  <div id="pageSummary" class="summary-masonry">
     <p class="text-muted small">Loading…</p>
   </div>
   {% endif %}
@@ -495,6 +616,9 @@ window.BB_STUDY_CONTEXT = {
   currentBookId: {{ current_book.id if current_book else 'null' }},
   currentPage: {{ current_page|tojson }},
   contentMode: {{ content_mode|tojson }},
+  secondaryBookId: {{ secondary_book.id if secondary_book else 'null' }},
+  secondaryPage: {{ secondary_page|tojson }},
+  secondaryContentMode: {{ secondary_content_mode|tojson }},
 };
 </script>
 <script src="{{ url_for('static', filename='js/index.js') }}"></script>

@@ -71,6 +71,22 @@ def _sync_sqlite_schema():
         db.session.execute(text('ALTER TABLE book_content ADD COLUMN verse INTEGER'))
         db.session.execute(text('UPDATE book_content SET verse = line WHERE verse IS NULL'))
         db.session.commit()
+    db.session.execute(text(
+        'CREATE TABLE IF NOT EXISTS book_content_formats ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'book_id INTEGER NOT NULL, '
+        'page VARCHAR(20), '
+        'paragraph INTEGER, '
+        'verse INTEGER, '
+        'is_bold BOOLEAN NOT NULL DEFAULT 0, '
+        'is_italic BOOLEAN NOT NULL DEFAULT 0, '
+        'created_at DATETIME, '
+        'updated_at DATETIME, '
+        'FOREIGN KEY(book_id) REFERENCES books(id), '
+        'CONSTRAINT uq_book_content_format_location UNIQUE (book_id, page, paragraph, verse)'
+        ')'
+    ))
+    db.session.commit()
     toc_columns = {col['name'] for col in inspector.get_columns('book_table_of_contents')}
     if 'chapter_number' not in toc_columns:
         db.session.execute(text('ALTER TABLE book_table_of_contents ADD COLUMN chapter_number VARCHAR(20)'))
@@ -107,11 +123,31 @@ def _sync_sqlite_schema():
         'chapter': 'VARCHAR(100)',
         'paragraph': 'INTEGER',
         'line': 'INTEGER',
+        'verse': 'INTEGER',
     }
     for column, column_type in source_schema_updates.items():
         if column not in source_columns:
             db.session.execute(text(f'ALTER TABLE sources ADD COLUMN {column} {column_type}'))
             db.session.commit()
+    if 'verse' in source_columns or 'line' in source_columns:
+        db.session.execute(text('UPDATE sources SET verse = line WHERE verse IS NULL AND line IS NOT NULL'))
+        db.session.commit()
+
+    commentary_columns = {col['name'] for col in inspector.get_columns('commentary')}
+    if 'verse' not in commentary_columns:
+        db.session.execute(text('ALTER TABLE commentary ADD COLUMN verse INTEGER'))
+        db.session.execute(text('UPDATE commentary SET verse = line WHERE verse IS NULL AND line IS NOT NULL'))
+        db.session.commit()
+
+    reference_columns = {col['name'] for col in inspector.get_columns('book_references')}
+    if 'source_verse' not in reference_columns:
+        db.session.execute(text('ALTER TABLE book_references ADD COLUMN source_verse INTEGER'))
+        db.session.execute(text('UPDATE book_references SET source_verse = source_line WHERE source_verse IS NULL AND source_line IS NOT NULL'))
+        db.session.commit()
+    if 'target_verse' not in reference_columns:
+        db.session.execute(text('ALTER TABLE book_references ADD COLUMN target_verse INTEGER'))
+        db.session.execute(text('UPDATE book_references SET target_verse = target_line WHERE target_verse IS NULL AND target_line IS NOT NULL'))
+        db.session.commit()
 
 
 def _seed_settings():
@@ -122,9 +158,69 @@ def _seed_settings():
     if not Setting.query.filter_by(key='current_book_id').first():
         db.session.add(Setting(key='current_book_id', value=''))
         db.session.commit()
+    if not Setting.query.filter_by(key='current_secondary_book_id').first():
+        db.session.add(Setting(key='current_secondary_book_id', value=''))
+        db.session.commit()
     if not Setting.query.filter_by(key='current_page').first():
         db.session.add(Setting(key='current_page', value='1'))
         db.session.commit()
     if not Setting.query.filter_by(key='current_content_mode').first():
         db.session.add(Setting(key='current_content_mode', value='sentence'))
         db.session.commit()
+    if not Setting.query.filter_by(key='export_text_layout').first():
+        db.session.add(Setting(key='export_text_layout', value='reflow_justified'))
+        db.session.commit()
+    export_defaults = {
+        'export_page_size': 'letter',
+        'export_book_alignment': 'justify',
+        'export_definition_alignment': 'left',
+        'export_commentary_alignment': 'left',
+        'export_margin_top': '0.45',
+        'export_margin_bottom': '0.45',
+        'export_chapter_gap': '0.46',
+        'export_page_number_gap': '0.35',
+        'export_inside_margin': '0.80',
+        'export_outside_margin': '0.45',
+        'export_column_gutter': '0.22',
+        'export_text_ratio': '0.667',
+        'export_commentary_columns': '3',
+        'export_commentary_column_gutter': '0.32',
+        'export_one_column_top': '0',
+        'export_section_gap': '0.18',
+        'export_rule_margin_above': '0.04',
+        'export_rule_margin_below': '0.21',
+        'export_chapter_font_size': '8.5',
+        'export_page_number_font_size': '8',
+        'export_book_font_size': '10.2',
+        'export_definition_font_size': '8.3',
+        'export_commentary_font_size': '7',
+        'export_annotation_font_size': '9',
+        'export_chapter_line_spacing': '1.0',
+        'export_page_number_line_spacing': '1.0',
+        'export_book_line_spacing': '1.35',
+        'export_definition_line_spacing': '1.3',
+        'export_commentary_line_spacing': '1.28',
+        'export_annotation_line_spacing': '1.33',
+        'export_chapter_kerning': '0',
+        'export_page_number_kerning': '0',
+        'export_book_kerning': '0',
+        'export_definition_kerning': '0',
+        'export_commentary_kerning': '0',
+        'export_annotation_kerning': '0',
+        'export_chapter_font': 'Helvetica',
+        'export_page_number_font': 'Helvetica',
+        'export_book_font': 'Times-Roman',
+        'export_definition_font': 'Helvetica',
+        'export_commentary_font': 'Helvetica',
+        'export_annotation_font': 'Helvetica',
+        'export_chapter_gray': '30',
+        'export_page_number_gray': '40',
+        'export_book_gray': '0',
+        'export_definition_gray': '0',
+        'export_commentary_gray': '0',
+        'export_annotation_gray': '0',
+    }
+    for key, value in export_defaults.items():
+        if not Setting.query.filter_by(key=key).first():
+            db.session.add(Setting(key=key, value=value))
+    db.session.commit()

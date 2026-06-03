@@ -14,8 +14,8 @@
   <table class="table table-hover align-middle table-sm">
     <thead>
       <tr>
-        <th>Source Book</th><th>Src Ch/Pg/Para/Ln</th>
-        <th>Target Book</th><th>Tgt Ch/Pg/Para/Ln</th>
+        <th>Source Book</th><th>Src Ch/Pg/Para/Verse</th>
+        <th>Target Book</th><th>Tgt Ch/Pg/Para/Verse</th>
         <th>Quoted Text</th><th>Comments</th><th></th>
       </tr>
     </thead>
@@ -24,11 +24,11 @@
       <tr data-id="{{ r.id }}">
         <td class="small">{{ r.source_book.title }}</td>
         <td class="small text-muted">
-          {{ r.source_chapter or '' }} / {{ r.source_page or '' }} / {{ r.source_paragraph or '' }} / {{ r.source_line or '' }}
+          {{ r.source_chapter or '' }} / {{ r.source_page or '' }} / {{ r.source_paragraph or '' }} / {{ r.source_verse or '' }}
         </td>
         <td class="small">{{ r.target_book.title }}</td>
         <td class="small text-muted">
-          {{ r.target_chapter or '' }} / {{ r.target_page or '' }} / {{ r.target_paragraph or '' }} / {{ r.target_line or '' }}
+          {{ r.target_chapter or '' }} / {{ r.target_page or '' }} / {{ r.target_paragraph or '' }} / {{ r.target_verse or '' }}
         </td>
         <td class="small">{{ (r.quoted_text or '')[:60] }}{% if r.quoted_text and r.quoted_text|length > 60 %}…{% endif %}</td>
         <td class="small">{{ (r.comments or '')[:60] }}{% if r.comments and r.comments|length > 60 %}…{% endif %}</td>
@@ -79,7 +79,7 @@
                 <input type="text" class="form-control form-control-sm" id="refSrcPageFull"></div>
               <div class="col"><label class="form-label small">Para</label>
                 <input type="number" class="form-control form-control-sm" id="refSrcParaFull"></div>
-              <div class="col"><label class="form-label small">Line</label>
+              <div class="col"><label class="form-label small">Verse</label>
                 <input type="number" class="form-control form-control-sm" id="refSrcLineFull"></div>
             </div>
           </div>
@@ -100,7 +100,7 @@
                 <input type="text" class="form-control form-control-sm" id="refTgtPageFull"></div>
               <div class="col"><label class="form-label small">Para</label>
                 <input type="number" class="form-control form-control-sm" id="refTgtParaFull"></div>
-              <div class="col"><label class="form-label small">Line</label>
+              <div class="col"><label class="form-label small">Verse</label>
                 <input type="number" class="form-control form-control-sm" id="refTgtLineFull"></div>
             </div>
           </div>
@@ -144,12 +144,12 @@ function openRefModal(data) {
   document.getElementById('refSrcChapterFull').value = data ? (data.source_chapter || '') : '';
   document.getElementById('refSrcPageFull').value = data ? (data.source_page || '') : '';
   document.getElementById('refSrcParaFull').value = data ? (data.source_paragraph || '') : '';
-  document.getElementById('refSrcLineFull').value = data ? (data.source_line || '') : '';
+  document.getElementById('refSrcLineFull').value = data ? (data.source_verse || data.source_line || '') : '';
   document.getElementById('refTgtBook').value = data ? data.target_book_id : '';
   document.getElementById('refTgtChapterFull').value = data ? (data.target_chapter || '') : '';
   document.getElementById('refTgtPageFull').value = data ? (data.target_page || '') : '';
   document.getElementById('refTgtParaFull').value = data ? (data.target_paragraph || '') : '';
-  document.getElementById('refTgtLineFull').value = data ? (data.target_line || '') : '';
+  document.getElementById('refTgtLineFull').value = data ? (data.target_verse || data.target_line || '') : '';
   document.getElementById('refQuotedFull').value = data ? (data.quoted_text || '') : '';
   document.getElementById('refCommentsFull').value = data ? (data.comments || '') : '';
   document.getElementById('refModalTitle').textContent = data ? 'Edit Reference' : 'Add Reference';
@@ -163,12 +163,12 @@ function saveRef() {
     source_chapter: document.getElementById('refSrcChapterFull').value.trim(),
     source_page: document.getElementById('refSrcPageFull').value.trim(),
     source_paragraph: parseInt(document.getElementById('refSrcParaFull').value) || null,
-    source_line: parseInt(document.getElementById('refSrcLineFull').value) || null,
+    source_verse: parseInt(document.getElementById('refSrcLineFull').value) || null,
     target_book_id: parseInt(document.getElementById('refTgtBook').value) || null,
     target_chapter: document.getElementById('refTgtChapterFull').value.trim(),
     target_page: document.getElementById('refTgtPageFull').value.trim(),
     target_paragraph: parseInt(document.getElementById('refTgtParaFull').value) || null,
-    target_line: parseInt(document.getElementById('refTgtLineFull').value) || null,
+    target_verse: parseInt(document.getElementById('refTgtLineFull').value) || null,
     quoted_text: document.getElementById('refQuotedFull').value.trim(),
     comments: document.getElementById('refCommentsFull').value.trim(),
   };

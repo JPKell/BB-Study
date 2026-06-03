@@ -13,7 +13,7 @@
 <div class="table-responsive">
   <table class="table table-hover align-middle table-sm">
     <thead>
-      <tr><th>Book</th><th>Ch</th><th>Page</th><th>Para</th><th>Line</th><th>Commentary</th><th>Date</th><th></th></tr>
+      <tr><th>Book</th><th>Ch</th><th>Page</th><th>Para</th><th>Verse</th><th>Commentary</th><th>Date</th><th></th></tr>
     </thead>
     <tbody>
       {% for c in entries %}
@@ -22,7 +22,7 @@
         <td>{{ c.chapter or '' }}</td>
         <td>{{ c.page or '' }}</td>
         <td>{{ c.paragraph or '' }}</td>
-        <td>{{ c.line or '' }}</td>
+        <td>{{ c.verse or '' }}</td>
         <td>{{ c.commentary_text[:80] }}{% if c.commentary_text|length > 80 %}…{% endif %}</td>
         <td class="text-muted small">{{ c.created_at.strftime('%Y-%m-%d') if c.created_at else '' }}</td>
         <td class="text-end">
@@ -68,7 +68,7 @@
             <input type="text" class="form-control form-control-sm" id="commPageFull"></div>
           <div class="col"><label class="form-label small">Para</label>
             <input type="number" class="form-control form-control-sm" id="commParaFull"></div>
-          <div class="col"><label class="form-label small">Line</label>
+          <div class="col"><label class="form-label small">Verse</label>
             <input type="number" class="form-control form-control-sm" id="commLineFull"></div>
         </div>
         <div>
@@ -106,7 +106,7 @@ function openCommModal(data) {
   document.getElementById('commChapterFull').value = data ? (data.chapter || '') : '';
   document.getElementById('commPageFull').value = data ? (data.page || '') : '';
   document.getElementById('commParaFull').value = data ? (data.paragraph || '') : '';
-  document.getElementById('commLineFull').value = data ? (data.line || '') : '';
+  document.getElementById('commLineFull').value = data ? (data.verse || data.line || '') : '';
   document.getElementById('commTextFull').value = data ? data.commentary_text : '';
   document.getElementById('commModalTitle').textContent = data ? 'Edit Commentary' : 'Add Commentary';
 }
@@ -119,7 +119,7 @@ function saveComm() {
     chapter: document.getElementById('commChapterFull').value.trim(),
     page: document.getElementById('commPageFull').value.trim(),
     paragraph: parseInt(document.getElementById('commParaFull').value) || null,
-    line: parseInt(document.getElementById('commLineFull').value) || null,
+    verse: parseInt(document.getElementById('commLineFull').value) || null,
     commentary_text: document.getElementById('commTextFull').value.trim(),
   };
   if (!payload.book_id || !payload.commentary_text) { showAlert('Book and commentary are required', 'warning'); return; }

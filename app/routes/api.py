@@ -6,7 +6,7 @@ from datetime import datetime
 from collections import defaultdict
 from flask import Blueprint, jsonify, request
 from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, BookLocation,
-                      DictionaryLookup, BookReference, BookContent,
+                      DictionaryLookup, BookReference, BookContent, BookContentFormat,
                       BookTableOfContents, ContentTopic, Commentary, Source,
                       Topic)
 from .. import db
@@ -830,12 +830,12 @@ def create_reference():
         source_chapter=data.get('source_chapter'),
         source_page=data.get('source_page'),
         source_paragraph=data.get('source_paragraph'),
-        source_line=data.get('source_line'),
+        source_verse=data.get('source_verse', data.get('source_line')),
         target_book_id=data['target_book_id'],
         target_chapter=data.get('target_chapter'),
         target_page=data.get('target_page'),
         target_paragraph=data.get('target_paragraph'),
-        target_line=data.get('target_line'),
+        target_verse=data.get('target_verse', data.get('target_line')),
         quoted_text=data.get('quoted_text'),
         comments=data.get('comments'),
     )
@@ -853,12 +853,14 @@ def get_reference(rid):
 def update_reference(rid):
     ref = BookReference.query.get_or_404(rid)
     data = request.get_json(force=True) or {}
+    field_aliases = {'source_line': 'source_verse', 'target_line': 'target_verse'}
     fields = ('source_book_id', 'source_chapter', 'source_page', 'source_paragraph',
-              'source_line', 'target_book_id', 'target_chapter', 'target_page',
-              'target_paragraph', 'target_line', 'quoted_text', 'comments')
+              'source_verse', 'source_line', 'target_book_id', 'target_chapter',
+              'target_page', 'target_paragraph', 'target_verse', 'target_line',
+              'quoted_text', 'comments')
     for field in fields:
         if field in data:
-            setattr(ref, field, data[field])
+            setattr(ref, field_aliases.get(field, field), data[field])
     db.session.commit()
     return _ok(ref.to_dict())
 
@@ -944,6 +946,60 @@ def delete_book_content(cid):
     return _ok(msg='Content deleted')
 
 
+@api_bp.route('/book-content-formats', methods=['GET'])
+def list_book_content_formats():
+    book_id = request.args.get('book_id', type=int)
+    page = request.args.get('page')
+    q = BookContentFormat.query
+    if book_id:
+        q = q.filter_by(book_id=book_id)
+    if page:
+        q = q.filter_by(page=page)
+    return jsonify([fmt.to_dict() for fmt in q.order_by(
+        BookContentFormat.page, BookContentFormat.paragraph, BookContentFormat.verse
+    ).all()])
+
+
+@api_bp.route('/book-content-formats', methods=['PUT'])
+def upsert_book_content_format():
+    data = request.get_json(force=True) or {}
+    required = ('book_id', 'page', 'paragraph', 'verse')
+    if any(data.get(field) in (None, '') for field in required):
+        return _err('book_id, page, paragraph, and verse are required')
+
+    book_id = int(data['book_id'])
+    paragraph = int(data['paragraph'])
+    verse = int(data['verse'])
+    page = str(data['page'])
+    is_bold = bool(data.get('is_bold', False))
+    is_italic = bool(data.get('is_italic', False))
+
+    fmt = BookContentFormat.query.filter_by(
+        book_id=book_id, page=page, paragraph=paragraph, verse=verse
+    ).first()
+
+    if not is_bold and not is_italic:
+        if fmt:
+            db.session.delete(fmt)
+            db.session.commit()
+        return _ok({
+            'book_id': book_id,
+            'page': page,
+            'paragraph': paragraph,
+            'verse': verse,
+            'is_bold': False,
+            'is_italic': False,
+        }, 'Content format cleared')
+
+    if not fmt:
+        fmt = BookContentFormat(book_id=book_id, page=page, paragraph=paragraph, verse=verse)
+        db.session.add(fmt)
+    fmt.is_bold = is_bold
+    fmt.is_italic = is_italic
+    db.session.commit()
+    return _ok(fmt.to_dict(), 'Content format saved')
+
+
 # ── Book Table of Contents ───────────────────────────────────────────────────
 
 @api_bp.route('/book-toc', methods=['GET'])
@@ -1022,7 +1078,7 @@ def create_commentary():
         chapter=data.get('chapter'),
         page=data.get('page'),
         paragraph=data.get('paragraph'),
-        line=data.get('line'),
+        verse=data.get('verse', data.get('line')),
         commentary_text=data['commentary_text'],
     )
     db.session.add(c)
@@ -1039,9 +1095,10 @@ def get_commentary(cid):
 def update_commentary(cid):
     c = Commentary.query.get_or_404(cid)
     data = request.get_json(force=True) or {}
-    for field in ('book_id', 'chapter', 'page', 'paragraph', 'line', 'commentary_text'):
+    field_aliases = {'line': 'verse'}
+    for field in ('book_id', 'chapter', 'page', 'paragraph', 'verse', 'line', 'commentary_text'):
         if field in data:
-            setattr(c, field, data[field])
+            setattr(c, field_aliases.get(field, field), data[field])
     c.updated_at = datetime.utcnow()
     db.session.commit()
     return _ok(c.to_dict())
@@ -1082,7 +1139,7 @@ def create_source():
         page=data.get('page'),
         chapter=data.get('chapter'),
         paragraph=data.get('paragraph'),
-        line=data.get('line'),
+        verse=data.get('verse', data.get('line')),
         name=data['name'],
         source_type=data.get('source_type', 'other'),
         url=data.get('url'),
@@ -1105,10 +1162,11 @@ def get_source(sid):
 def update_source(sid):
     s = Source.query.get_or_404(sid)
     data = request.get_json(force=True) or {}
-    for field in ('book_id', 'page', 'chapter', 'paragraph', 'line',
+    field_aliases = {'line': 'verse'}
+    for field in ('book_id', 'page', 'chapter', 'paragraph', 'verse', 'line',
                   'name', 'source_type', 'url', 'author', 'publication', 'publish_date', 'notes'):
         if field in data:
-            setattr(s, field, data[field])
+            setattr(s, field_aliases.get(field, field), data[field])
     db.session.commit()
     return _ok(s.to_dict())
 

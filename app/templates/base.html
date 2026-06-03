@@ -27,46 +27,59 @@
              href="{{ url_for('main.index') }}"><i class="bi bi-house-door me-1"></i>Read</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.books' %}active{% endif %}"
-             href="{{ url_for('main.books') }}"><i class="bi bi-journals me-1"></i>Books</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.pamphlets' %}active{% endif %}"
-             href="{{ url_for('main.pamphlets') }}"><i class="bi bi-file-earmark-text me-1"></i>Pamphlets</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.dictionary' %}active{% endif %}"
-             href="{{ url_for('main.dictionary') }}"><i class="bi bi-alphabet me-1"></i>Dictionary</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.topics' %}active{% endif %}"
-             href="{{ url_for('main.topics') }}"><i class="bi bi-tags me-1"></i>Topics</a>
-        </li>
-        <li class="nav-item">
           <a class="nav-link {% if request.endpoint == 'main.search' %}active{% endif %}"
              href="{{ url_for('main.search') }}"><i class="bi bi-search me-1"></i>Search</a>
         </li>
-        <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.book_content' %}active{% endif %}"
-             href="{{ url_for('main.book_content') }}"><i class="bi bi-card-text me-1"></i>Content</a>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if request.endpoint in ['main.books', 'main.pamphlets'] %}active{% endif %}"
+             href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-journals me-1"></i>Library
+          </a>
+          <ul class="dropdown-menu">
+            <li>
+              <a class="dropdown-item {% if request.endpoint == 'main.books' %}active{% endif %}"
+                 href="{{ url_for('main.books') }}"><i class="bi bi-book me-1"></i>Books</a>
+            </li>
+            <li>
+              <a class="dropdown-item {% if request.endpoint == 'main.pamphlets' %}active{% endif %}"
+                 href="{{ url_for('main.pamphlets') }}"><i class="bi bi-file-earmark-text me-1"></i>Pamphlets</a>
+            </li>
+          </ul>
         </li>
-        <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.references' %}active{% endif %}"
-             href="{{ url_for('main.references') }}"><i class="bi bi-link-45deg me-1"></i>References</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.commentary' %}active{% endif %}"
-             href="{{ url_for('main.commentary') }}"><i class="bi bi-chat-square-text me-1"></i>Commentary</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link {% if request.endpoint == 'main.sources' %}active{% endif %}"
-             href="{{ url_for('main.sources') }}"><i class="bi bi-globe me-1"></i>Sources</a>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if request.endpoint in ['main.dictionary', 'main.topics', 'main.references', 'main.commentary', 'main.sources'] %}active{% endif %}"
+             href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-collection me-1"></i>Study Data
+          </a>
+          <ul class="dropdown-menu">
+            <li>
+              <a class="dropdown-item {% if request.endpoint == 'main.dictionary' %}active{% endif %}"
+                 href="{{ url_for('main.dictionary') }}"><i class="bi bi-alphabet me-1"></i>Dictionary</a>
+            </li>
+            <li>
+              <a class="dropdown-item {% if request.endpoint == 'main.topics' %}active{% endif %}"
+                 href="{{ url_for('main.topics') }}"><i class="bi bi-tags me-1"></i>Topics</a>
+            </li>
+            <li>
+              <a class="dropdown-item {% if request.endpoint == 'main.references' %}active{% endif %}"
+                 href="{{ url_for('main.references') }}"><i class="bi bi-link-45deg me-1"></i>References</a>
+            </li>
+            <li>
+              <a class="dropdown-item {% if request.endpoint == 'main.commentary' %}active{% endif %}"
+                 href="{{ url_for('main.commentary') }}"><i class="bi bi-chat-square-text me-1"></i>Commentary</a>
+            </li>
+            <li>
+              <a class="dropdown-item {% if request.endpoint == 'main.sources' %}active{% endif %}"
+                 href="{{ url_for('main.sources') }}"><i class="bi bi-globe me-1"></i>Sources</a>
+            </li>
+          </ul>
         </li>
       </ul>
+      {% block navbar_tools %}{% endblock %}
       <ul class="navbar-nav ms-auto">
         <li class="nav-item">
           <a class="nav-link {% if request.endpoint == 'main.settings' %}active{% endif %}"
-             href="{{ url_for('main.settings') }}"><i class="bi bi-gear me-1"></i>Settings</a>
+             href="{{ url_for('main.settings') }}"><i class="bi bi-file-earmark-pdf me-1"></i>Export Settings</a>
         </li>
         <li class="nav-item ms-2">
           <button class="btn btn-sm btn-outline-light" id="themeToggleBtn" title="Toggle light/dark mode">

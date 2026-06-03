@@ -199,13 +199,13 @@ class BookReference(db.Model):
     source_chapter = db.Column(db.String(100))
     source_page = db.Column(db.String(20))
     source_paragraph = db.Column(db.Integer)
-    source_line = db.Column(db.Integer)
+    source_verse = db.Column(db.Integer)
     # Target (the referenced book)
     target_book_id = db.Column(db.Integer, db.ForeignKey('books.id'), nullable=False)
     target_chapter = db.Column(db.String(100))
     target_page = db.Column(db.String(20))
     target_paragraph = db.Column(db.Integer)
-    target_line = db.Column(db.Integer)
+    target_verse = db.Column(db.Integer)
     # Content
     quoted_text = db.Column(db.Text)
     comments = db.Column(db.Text)
@@ -224,13 +224,15 @@ class BookReference(db.Model):
             'source_chapter': self.source_chapter,
             'source_page': self.source_page,
             'source_paragraph': self.source_paragraph,
-            'source_line': self.source_line,
+            'source_verse': self.source_verse,
+            'source_line': self.source_verse,
             'target_book_id': self.target_book_id,
             'target_book_title': self.target_book.title if self.target_book else None,
             'target_chapter': self.target_chapter,
             'target_page': self.target_page,
             'target_paragraph': self.target_paragraph,
-            'target_line': self.target_line,
+            'target_verse': self.target_verse,
+            'target_line': self.target_verse,
             'quoted_text': self.quoted_text,
             'comments': self.comments,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -272,6 +274,39 @@ class BookContent(db.Model):
             'verse': self.verse,
             'content': self.content,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class BookContentFormat(db.Model):
+    """Verse-level presentation formatting for exported/read book text."""
+    __tablename__ = 'book_content_formats'
+    id = db.Column(db.Integer, primary_key=True)
+    book_id = db.Column(db.Integer, db.ForeignKey('books.id'), nullable=False)
+    page = db.Column(db.String(20))
+    paragraph = db.Column(db.Integer)
+    verse = db.Column(db.Integer)
+    is_bold = db.Column(db.Boolean, nullable=False, default=False)
+    is_italic = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    book = db.relationship('Book', backref=db.backref('content_formats', lazy=True, cascade='all, delete-orphan'))
+
+    __table_args__ = (
+        db.UniqueConstraint('book_id', 'page', 'paragraph', 'verse', name='uq_book_content_format_location'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'book_id': self.book_id,
+            'page': self.page,
+            'paragraph': self.paragraph,
+            'verse': self.verse,
+            'is_bold': self.is_bold,
+            'is_italic': self.is_italic,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -387,7 +422,7 @@ class Commentary(db.Model):
     chapter = db.Column(db.String(100))
     page = db.Column(db.String(20))
     paragraph = db.Column(db.Integer)
-    line = db.Column(db.Integer)
+    verse = db.Column(db.Integer)
     commentary_text = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -400,7 +435,8 @@ class Commentary(db.Model):
             'chapter': self.chapter,
             'page': self.page,
             'paragraph': self.paragraph,
-            'line': self.line,
+            'verse': self.verse,
+            'line': self.verse,
             'commentary_text': self.commentary_text,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -415,7 +451,7 @@ class Source(db.Model):
     page = db.Column(db.String(20))
     chapter = db.Column(db.String(100))
     paragraph = db.Column(db.Integer)
-    line = db.Column(db.Integer)
+    verse = db.Column(db.Integer)
     name = db.Column(db.String(500), nullable=False)
     source_type = db.Column(db.String(100))   # speaker, website, magazine, other
     url = db.Column(db.String(1000))
@@ -435,7 +471,8 @@ class Source(db.Model):
             'page': self.page,
             'chapter': self.chapter,
             'paragraph': self.paragraph,
-            'line': self.line,
+            'verse': self.verse,
+            'line': self.verse,
             'name': self.name,
             'source_type': self.source_type,
             'url': self.url,
