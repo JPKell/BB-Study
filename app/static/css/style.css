@@ -146,18 +146,23 @@ html, body {
   cursor: text;
 }
 .book-line {
+  position: relative;
   max-width: 65ch;
   margin-left: auto;
   margin-right: auto;
+  padding-left: 2.25em;
   min-height: 1.45rem;
   white-space: normal;
   text-align: left;
   line-height: 1.6;
 }
 .sentence-verse {
+  position: relative;
   max-width: 65ch;
   margin-left: auto;
   margin-right: auto;
+  padding-left: 2.25em;
+  min-height: 1.45rem;
   text-align: left;
   line-height: 1.6;
 }
@@ -175,12 +180,55 @@ html, body {
 .formatted-italic {
   font-style: italic;
 }
+.formatted-role-title,
+.formatted-role-chapter {
+  display: block;
+  text-align: center;
+  font-weight: 700;
+}
+.formatted-role-subtitle {
+  display: block;
+  text-align: center;
+  font-style: italic;
+}
+.formatted-role-header {
+  font-weight: 700;
+}
+.formatted-role-poetry {
+  display: block;
+}
+.book-line > .line-text.formatted-role-title,
+.book-line > .line-text.formatted-role-subtitle,
+.book-line > .line-text.formatted-role-chapter,
+.book-line > .line-text.formatted-role-poetry,
+.sentence-verse > .verse-fragment.formatted-role-title,
+.sentence-verse > .verse-fragment.formatted-role-subtitle,
+.sentence-verse > .verse-fragment.formatted-role-chapter,
+.sentence-verse > .verse-fragment.formatted-role-poetry {
+  display: inline;
+}
+.formatted-align-left {
+  text-align: left;
+}
+.formatted-align-center {
+  text-align: center;
+}
+.formatted-align-right {
+  text-align: right;
+}
+.formatted-align-justify {
+  text-align: justify;
+}
 .content-number {
-  display: inline-block;
+  position: absolute;
+  left: 0;
+  top: 0.2em;
+  display: block;
   min-width: 1.75em;
   color: var(--bs-secondary-color);
   font-size: 0.7em;
-  margin-right: 0.25rem;
+  margin-right: 0;
+  text-align: right;
 }
 
 .search-results-dropdown {
@@ -502,6 +550,18 @@ html, body {
   gap: 0.75rem;
 }
 
+.export-typography-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.export-typography-tabs .nav-link {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.82rem;
+}
+
 .export-font-row {
   border-bottom: 1px solid var(--bs-border-color);
   padding-bottom: 0.75rem;
@@ -517,6 +577,13 @@ html, body {
   grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.75rem;
   align-items: end;
+}
+
+.export-style-switches {
+  display: flex;
+  gap: 0.9rem;
+  align-items: end;
+  min-height: 2rem;
 }
 
 .export-font-row:last-child {

@@ -75,16 +75,6 @@
               </select>
             </div>
             <div class="col-auto">
-              <div class="btn-group btn-group-sm" role="group" aria-label="Verse formatting">
-                <button class="btn btn-outline-secondary" id="verseBoldBtn" type="button" title="Bold selected verse">
-                  <i class="bi bi-type-bold"></i>
-                </button>
-                <button class="btn btn-outline-secondary" id="verseItalicBtn" type="button" title="Italic selected verse">
-                  <i class="bi bi-type-italic"></i>
-                </button>
-              </div>
-            </div>
-            <div class="col-auto">
               {% if current_book and current_book.pdf_path %}
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.book_pdf', book_id=current_book.id) }}" target="_blank" rel="noopener">
                   <i class="bi bi-file-earmark-pdf me-1"></i>PDF
@@ -114,9 +104,11 @@
                     {% set cur_para.val = item.paragraph %}
                   {% endif %}
                   {% set fmt = content_formats.get(item.paragraph ~ '-' ~ item.verse) %}
-                  <span class="line-text verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }}"
+                  <span class="line-text verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }} {{ 'formatted-role-' ~ fmt.content_role if fmt and fmt.content_role and fmt.content_role != 'body' else '' }} {{ 'formatted-align-' ~ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                         data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
                         data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
+                        data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
+                        data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                         data-content-id="{{ item.id }}"
                         data-raw-content="{{ item.content }}"
                         data-verse-key="{{ item.paragraph }}-{{ item.verse }}"
@@ -135,18 +127,22 @@
                   {% if verse_key != cur_verse.val %}
                     {% if cur_verse.val %}</div>{% endif %}
                     {% set fmt = content_formats.get(verse_key) %}
-                    <div class="d-block line-text sentence-verse {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }}"
+                    <div class="d-block line-text sentence-verse {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }} {{ 'formatted-role-' ~ fmt.content_role if fmt and fmt.content_role and fmt.content_role != 'body' else '' }} {{ 'formatted-align-' ~ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                          data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
                          data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
+                         data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
+                         data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                          data-verse-key="{{ verse_key }}"
                          data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.verse }}</sup>
                     {% set cur_verse.val = verse_key %}
                     {% set cur_para.val = item.paragraph %}
                   {% endif %}
                   {% set fmt = content_formats.get(verse_key) %}
-                  <span class="verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }}"
+                  <span class="verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }} {{ 'formatted-role-' ~ fmt.content_role if fmt and fmt.content_role and fmt.content_role != 'body' else '' }} {{ 'formatted-align-' ~ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                         data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
                         data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
+                        data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
+                        data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                         data-content-id="{{ item.id }}"
                         data-raw-content="{{ item.content }}"
                         data-verse-key="{{ verse_key }}"
@@ -330,27 +326,42 @@
         <ul class="nav nav-tabs card-header-tabs" id="entryTabs">
           <li class="nav-item">
             <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabDict">
-              <i class="bi bi-alphabet me-1"></i>Dictionary
+              Dictionary
             </button>
           </li>
           <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabRef">
-              <i class="bi bi-link-45deg me-1"></i>Book Ref
+              Book Ref
             </button>
           </li>
           <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabComm">
-              <i class="bi bi-chat-square-text me-1"></i>Commentary
+              Commentary
             </button>
           </li>
           <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTopic">
-              <i class="bi bi-tags me-1"></i>Topic
+              Topic
             </button>
           </li>
           <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSrc">
-              <i class="bi bi-globe me-1"></i>Other Ref
+              Other Ref
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabFormat">
+              Format
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSplit">
+              Split
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPageFormat">
+              Page
             </button>
           </li>
         </ul>
@@ -546,6 +557,17 @@
                 <option value="other">Other</option>
               </select>
             </div>
+            <div class="row g-1 mb-2">
+              <div class="col-12">
+                <label class="form-label small mb-1">Chapter / Page / Para / Verse</label>
+                <div class="row g-1">
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="srcChapter" placeholder="Ch"></div>
+                  <div class="col"><input type="text" class="form-control form-control-sm" id="srcPage" placeholder="Page"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="srcPara" placeholder="Para"></div>
+                  <div class="col"><input type="number" class="form-control form-control-sm" id="srcVerse" placeholder="Verse"></div>
+                </div>
+              </div>
+            </div>
             <div class="mb-2">
               <label class="form-label small mb-1">Author</label>
               <input type="text" class="form-control form-control-sm" id="srcAuthor">
@@ -566,6 +588,83 @@
               <i class="bi bi-plus-circle me-1"></i>Save Source
             </button>
           </form>
+        </div>
+
+        <!-- Format tab -->
+        <div class="tab-pane fade" id="tabFormat">
+          <div class="mb-2">
+            <label class="form-label small mb-1">Selected Text</label>
+            <textarea class="form-control form-control-sm" id="formatSelectedText" rows="3" readonly></textarea>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1">Text Role</label>
+            <select class="form-select form-select-sm" id="formatContentRole">
+              <option value="body">Body</option>
+              <option value="title">Title</option>
+              <option value="subtitle">Subtitle</option>
+              <option value="chapter">Chapter</option>
+              <option value="header">Header</option>
+              <option value="poetry">Poetry</option>
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1">Alignment Override</label>
+            <select class="form-select form-select-sm" id="formatAlignmentOverride">
+              <option value="">Default</option>
+              <option value="left">Left</option>
+              <option value="center">Center</option>
+              <option value="right">Right</option>
+              <option value="justify">Justified</option>
+            </select>
+          </div>
+          <div class="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Text emphasis">
+            <button class="btn btn-outline-secondary" id="verseBoldBtn" type="button" title="Bold selected text">
+              <i class="bi bi-type-bold"></i>
+            </button>
+            <button class="btn btn-outline-secondary" id="verseItalicBtn" type="button" title="Italic selected text">
+              <i class="bi bi-type-italic"></i>
+            </button>
+          </div>
+          <button type="button" class="btn btn-sm btn-success w-100" id="saveFormatBtn">
+            <i class="bi bi-check2-circle me-1"></i>Save Format
+          </button>
+        </div>
+
+        <!-- Split text tab -->
+        <div class="tab-pane fade" id="tabSplit">
+          <form id="splitForm" class="mb-0">
+            <input type="hidden" id="splitContentId">
+            <div class="mb-2">
+              <label class="form-label small mb-1">Selected Text</label>
+              <textarea class="form-control form-control-sm" id="splitOriginalText" rows="3" readonly></textarea>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small mb-1">Split Marker</label>
+              <textarea class="form-control form-control-sm" id="splitMarkerText" rows="4"></textarea>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary w-100 mb-2" id="insertSplitMarkerBtn">
+              <i class="bi bi-cursor-text me-1"></i>Insert Marker at Cursor
+            </button>
+            <button type="submit" class="btn btn-sm btn-success w-100">
+              <i class="bi bi-scissors me-1"></i>Split Text
+            </button>
+          </form>
+        </div>
+
+        <!-- Page format tab -->
+        <div class="tab-pane fade" id="tabPageFormat">
+          <div class="mb-3">
+            <div class="small text-muted mb-2">
+              {{ current_book.title if current_book else 'No book selected' }}{% if current_book %} · page {{ current_page }}{% endif %}
+            </div>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" role="switch"
+                     id="pageCenteredExportSwitch" {% if not current_book %}disabled{% endif %}>
+              <label class="form-check-label small fw-semibold" for="pageCenteredExportSwitch">
+                Center page text on export
+              </label>
+            </div>
+          </div>
         </div>
 
 

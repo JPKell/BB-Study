@@ -71,6 +71,8 @@ document.addEventListener('click', e => {
 });
 document.getElementById('verseBoldBtn')?.addEventListener('click', () => toggleSelectedVerseFormat('bold'));
 document.getElementById('verseItalicBtn')?.addEventListener('click', () => toggleSelectedVerseFormat('italic'));
+document.getElementById('saveFormatBtn')?.addEventListener('click', () => saveSelectedVerseFormat());
+document.getElementById('pageCenteredExportSwitch')?.addEventListener('change', savePageFormat);
 
 function loadPage() {
   const page = document.getElementById('pageInput').value.trim();
@@ -141,6 +143,37 @@ function persistSetting(key, value) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: String(value) }),
   });
+}
+
+async function loadPageFormat() {
+  const control = document.getElementById('pageCenteredExportSwitch');
+  if (!control || !CURRENT_BOOK_ID || !CURRENT_PAGE) return;
+  const params = new URLSearchParams({ book_id: CURRENT_BOOK_ID, page: CURRENT_PAGE });
+  const response = await fetch(`/api/book-page-format?${params.toString()}`);
+  if (!response.ok) return;
+  const data = await response.json();
+  control.checked = !!data.centered_export;
+}
+
+async function savePageFormat() {
+  const control = document.getElementById('pageCenteredExportSwitch');
+  if (!control || !CURRENT_BOOK_ID || !CURRENT_PAGE) return;
+  control.disabled = true;
+  const response = await fetch('/api/book-page-format', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      book_id: CURRENT_BOOK_ID,
+      page: CURRENT_PAGE,
+      centered_export: control.checked,
+    }),
+  });
+  control.disabled = false;
+  if (!response.ok) {
+    showAlert('Could not save page format', 'danger');
+    return;
+  }
+  showAlert('Page format saved', 'success', 1200);
 }
 
 /* ── Read search dropdown ──────────────────────────────────────────────────── */
@@ -331,10 +364,14 @@ function loadPageSummary() {
       if (data.sources && data.sources.length) {
         data.sources.forEach(s => {
           const ref = s.url ? `<p class="mb-1">${escHtml(s.url)}</p>` : '';
+          const loc = s.page || s.paragraph || s.verse
+            ? `<div class="text-muted small mb-1">p. ${escHtml(s.page || '')} · ¶${s.paragraph || ''} · v${s.verse || s.line || ''}</div>`
+            : '';
           summaryCards.push(makeSummaryCard('Other Ref', 'reference',
             `${rankBadge(s.rank)}
              <div class="mb-1"><span class="badge text-bg-secondary">${escHtml(s.source_type || 'other')}</span></div>
              <p class="mb-1 fw-semibold">${escHtml(s.name || '')}</p>
+             ${loc}
              ${ref}
              ${s.notes ? `<p class="text-muted small mb-0">${escHtml(s.notes)}</p>` : ''}`,
             s.id, 'sources', 'source', s.rank));
@@ -635,6 +672,10 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('srcId', source.id);
     setValue('srcName', source.name || '');
     setValue('srcType', source.source_type || 'other');
+    setValue('srcChapter', source.chapter || '');
+    setValue('srcPage', source.page || CURRENT_PAGE || '');
+    setValue('srcPara', source.paragraph || '');
+    setValue('srcVerse', source.verse || source.line || '');
     setValue('srcAuthor', source.author || '');
     setValue('srcUrl', source.url || '');
     setValue('srcNotes', source.notes || '');
@@ -747,6 +788,10 @@ function selectVerse(fragment) {
   setValue('commPage', selection.page);
   setValue('commPara', selection.paragraph);
   setValue('commLine', selection.verse);
+  setValue('srcChapter', selection.chapter);
+  setValue('srcPage', selection.page);
+  setValue('srcPara', selection.paragraph);
+  setValue('srcVerse', selection.verse);
   setValue('topicChapter', selection.chapter);
   setValue('topicPage', selection.page);
   setValue('topicPara', selection.paragraph);
@@ -755,6 +800,11 @@ function selectVerse(fragment) {
   setValue('topicContentIds', selection.ids.join(','));
   setValue('topicStartContentId', selection.lowId || '');
   setValue('topicEndContentId', selection.highId || '');
+  setValue('formatSelectedText', selection.fullText);
+  setValue('formatContentRole', selection.contentRole || 'body');
+  setValue('splitContentId', selection.selectedId || '');
+  setValue('splitOriginalText', selection.selectedText || '');
+  setValue('splitMarkerText', selection.selectedText || '');
   resetTopicEditor();
   saveTopicDraft();
   updateVerseFormatButtons(selection);
@@ -775,8 +825,12 @@ function getVerseSelection(fragment) {
     page: fragment.dataset.page || CURRENT_PAGE || '',
     paragraph: fragment.dataset.paragraph || '',
     verse: fragment.dataset.verse || '',
+    selectedId: parseInt(fragment.dataset.contentId) || null,
+    selectedText: (fragment.dataset.rawContent || fragment.textContent || '').trim(),
     isBold: matches.some(el => el.dataset.isBold === 'true' || el.classList.contains('formatted-bold')),
     isItalic: matches.some(el => el.dataset.isItalic === 'true' || el.classList.contains('formatted-italic')),
+    contentRole: matches.find(el => el.dataset.contentRole)?.dataset.contentRole || 'body',
+    alignmentOverride: matches.find(el => el.dataset.alignmentOverride)?.dataset.alignmentOverride || '',
   };
 }
 
@@ -789,6 +843,9 @@ function updateVerseFormatButtons(selection = currentVerseSelection) {
   italicBtn.disabled = !hasSelection;
   boldBtn.classList.toggle('active', !!selection?.isBold);
   italicBtn.classList.toggle('active', !!selection?.isItalic);
+  setValue('formatContentRole', selection?.contentRole || 'body');
+  setValue('formatAlignmentOverride', selection?.alignmentOverride || '');
+  setValue('formatSelectedText', selection?.fullText || '');
 }
 
 async function toggleSelectedVerseFormat(kind) {
@@ -798,13 +855,33 @@ async function toggleSelectedVerseFormat(kind) {
   }
   const nextBold = kind === 'bold' ? !currentVerseSelection.isBold : currentVerseSelection.isBold;
   const nextItalic = kind === 'italic' ? !currentVerseSelection.isItalic : currentVerseSelection.isItalic;
+  await saveSelectedVerseFormat(
+    nextBold,
+    nextItalic,
+    currentVerseSelection.contentRole || 'body',
+    currentVerseSelection.alignmentOverride || ''
+  );
+}
+
+async function saveSelectedVerseFormat(
+  isBold = currentVerseSelection?.isBold,
+  isItalic = currentVerseSelection?.isItalic,
+  contentRole = document.getElementById('formatContentRole')?.value || 'body',
+  alignmentOverride = document.getElementById('formatAlignmentOverride')?.value || ''
+) {
+  if (!currentVerseSelection || !CURRENT_BOOK_ID) {
+    showAlert('Select text first', 'warning');
+    return;
+  }
   const payload = {
     book_id: CURRENT_BOOK_ID,
     page: currentVerseSelection.page,
     paragraph: parseInt(currentVerseSelection.paragraph),
     verse: parseInt(currentVerseSelection.verse),
-    is_bold: nextBold,
-    is_italic: nextItalic,
+    is_bold: !!isBold,
+    is_italic: !!isItalic,
+    content_role: contentRole,
+    alignment_override: alignmentOverride,
   };
   const res = await fetch('/api/book-content-formats', {
     method: 'PUT',
@@ -815,25 +892,48 @@ async function toggleSelectedVerseFormat(kind) {
     showAlert('Could not save formatting', 'danger');
     return;
   }
-  applyVerseFormatting(currentVerseSelection.matches, nextBold, nextItalic);
-  currentVerseSelection.isBold = nextBold;
-  currentVerseSelection.isItalic = nextItalic;
+  applyVerseFormatting(currentVerseSelection.matches, !!isBold, !!isItalic, contentRole, alignmentOverride);
+  currentVerseSelection.isBold = !!isBold;
+  currentVerseSelection.isItalic = !!isItalic;
+  currentVerseSelection.contentRole = contentRole;
+  currentVerseSelection.alignmentOverride = alignmentOverride;
   updateVerseFormatButtons(currentVerseSelection);
+  showAlert('Format saved', 'success', 1200);
 }
 
-function applyVerseFormatting(elements, isBold, isItalic) {
+function applyVerseFormatting(elements, isBold, isItalic, contentRole = 'body', alignmentOverride = '') {
   elements.forEach(el => {
     el.dataset.isBold = isBold ? 'true' : 'false';
     el.dataset.isItalic = isItalic ? 'true' : 'false';
+    el.dataset.contentRole = contentRole;
+    el.dataset.alignmentOverride = alignmentOverride;
     el.classList.toggle('formatted-bold', isBold);
     el.classList.toggle('formatted-italic', isItalic);
+    updateRoleClasses(el, contentRole);
+    updateAlignmentClasses(el, alignmentOverride);
     const verse = el.closest('.sentence-verse');
     if (verse) {
       verse.dataset.isBold = isBold ? 'true' : 'false';
       verse.dataset.isItalic = isItalic ? 'true' : 'false';
+      verse.dataset.contentRole = contentRole;
+      verse.dataset.alignmentOverride = alignmentOverride;
       verse.classList.toggle('formatted-bold', isBold);
       verse.classList.toggle('formatted-italic', isItalic);
+      updateRoleClasses(verse, contentRole);
+      updateAlignmentClasses(verse, alignmentOverride);
     }
+  });
+}
+
+function updateRoleClasses(el, contentRole) {
+  ['title', 'subtitle', 'chapter', 'header', 'poetry'].forEach(role => {
+    el.classList.toggle(`formatted-role-${role}`, contentRole === role);
+  });
+}
+
+function updateAlignmentClasses(el, alignmentOverride) {
+  ['left', 'center', 'right', 'justify'].forEach(alignment => {
+    el.classList.toggle(`formatted-align-${alignment}`, alignmentOverride === alignment);
   });
 }
 
@@ -1002,6 +1102,7 @@ function resetSourceForm() {
   document.getElementById('srcForm')?.reset();
   currentSourceEditId = null;
   setValue('srcId', '');
+  if (CURRENT_PAGE) setValue('srcPage', CURRENT_PAGE);
 }
 
 function combineVerseText(parts) {
@@ -1387,7 +1488,10 @@ document.getElementById('srcForm').addEventListener('submit', async function (e)
 
   const payload = {
     book_id: CURRENT_BOOK_ID,
-    page: CURRENT_PAGE,
+    chapter: document.getElementById('srcChapter').value.trim(),
+    page: document.getElementById('srcPage').value.trim() || CURRENT_PAGE,
+    paragraph: parseInt(document.getElementById('srcPara').value) || null,
+    verse: parseInt(document.getElementById('srcVerse').value) || null,
     name,
     source_type: document.getElementById('srcType').value,
     author: document.getElementById('srcAuthor').value.trim(),
@@ -1406,6 +1510,45 @@ document.getElementById('srcForm').addEventListener('submit', async function (e)
   showAlert(srcId ? 'Source updated' : 'Source saved', 'success');
   resetSourceForm();
   loadPageSummary();
+});
+
+/* ── Split selected text ───────────────────────────────────────────────────── */
+
+document.getElementById('insertSplitMarkerBtn')?.addEventListener('click', () => {
+  const field = document.getElementById('splitMarkerText');
+  if (!field) return;
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? start;
+  field.value = `${field.value.slice(0, start)}|${field.value.slice(end)}`;
+  field.focus();
+  field.selectionStart = field.selectionEnd = start + 1;
+});
+
+document.getElementById('splitForm')?.addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const contentId = document.getElementById('splitContentId').value;
+  const markerText = document.getElementById('splitMarkerText').value;
+  if (!contentId) {
+    showAlert('Select text to split first', 'warning');
+    return;
+  }
+  if ((markerText.match(/\|/g) || []).length !== 1) {
+    showAlert('Place exactly one | where the text should split', 'warning');
+    return;
+  }
+
+  const res = await fetch(`/api/book-content/${contentId}/split`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ marker_text: markerText }),
+  }).then(r => r.json()).catch(() => ({ error: 'Split failed' }));
+
+  if (res.error) {
+    showAlert(res.error || 'Split failed', 'danger');
+    return;
+  }
+  showAlert('Text split', 'success', 1200);
+  location.reload();
 });
 
 /* ── Add content modal (save button) ───────────────────────────────────────── */
@@ -1443,11 +1586,12 @@ document.getElementById('saveContentBtn').addEventListener('click', async functi
 document.addEventListener('DOMContentLoaded', () => {
   updateVerseFormatButtons();
   if (CURRENT_PAGE) {
-    ['dictPage', 'refSrcPage', 'commPage'].forEach(id => {
+    ['dictPage', 'refSrcPage', 'commPage', 'srcPage'].forEach(id => {
       const el = document.getElementById(id);
       if (el && !el.value) el.value = CURRENT_PAGE;
     });
   }
+  loadPageFormat();
   loadPageSummary();
   Promise.resolve(loadTopicOptions()).then(() => {
     setTopicEditMode(false);

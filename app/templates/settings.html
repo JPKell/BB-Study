@@ -1,53 +1,99 @@
 {% extends 'base.html' %}
 {% block title %}Export Settings - BB Study{% endblock %}
 
-{% macro font_section(title, prefix, size_key, font_key, gray_key, line_key, kerning_key) %}
-<div class="export-font-row">
-  <div class="export-font-heading">{{ title }}</div>
-  <div class="export-font-controls">
-    <div>
-      <label class="form-label small fw-semibold" for="{{ prefix }}Font">Font</label>
-      <select class="form-select form-select-sm export-setting-input" id="{{ prefix }}Font" data-setting-key="{{ font_key }}">
-        <option value="Times-Roman" {% if export_settings[font_key] == 'Times-Roman' %}selected{% endif %}>Times</option>
-        <option value="Helvetica" {% if export_settings[font_key] == 'Helvetica' %}selected{% endif %}>Helvetica</option>
-        <option value="Courier" {% if export_settings[font_key] == 'Courier' %}selected{% endif %}>Courier</option>
-      </select>
-    </div>
-    <div>
-      <label class="form-label small fw-semibold" for="{{ prefix }}Size">Size</label>
-      <div class="input-group input-group-sm">
-        <input class="form-control export-setting-input" id="{{ prefix }}Size" type="number" min="5" max="18" step="0.1"
-               data-setting-key="{{ size_key }}" value="{{ export_settings[size_key] }}">
-        <span class="input-group-text">pt</span>
+{% macro typography_section(title, prefix, size_key, font_key, gray_key, line_key, kerning_key, alignment_key='', bold_key='', italic_key='', extra_fields=()) %}
+<div class="tab-pane fade{% if prefix == 'bookText' %} show active{% endif %}" id="{{ prefix }}TypographyPane" role="tabpanel">
+  <div class="export-font-row">
+    <div class="export-font-heading">{{ title }}</div>
+    <div class="export-font-controls">
+      <div>
+        <label class="form-label small fw-semibold" for="{{ prefix }}Font">Font</label>
+        <select class="form-select form-select-sm export-setting-input" id="{{ prefix }}Font" data-setting-key="{{ font_key }}">
+          <option value="Times-Roman" {% if export_settings[font_key] == 'Times-Roman' %}selected{% endif %}>Times</option>
+          <option value="Helvetica" {% if export_settings[font_key] == 'Helvetica' %}selected{% endif %}>Helvetica</option>
+          <option value="Courier" {% if export_settings[font_key] == 'Courier' %}selected{% endif %}>Courier</option>
+        </select>
       </div>
-    </div>
-    <div>
-      <label class="form-label small fw-semibold" for="{{ prefix }}LineSpacing">Line</label>
-      <div class="input-group input-group-sm">
-        <input class="form-control export-setting-input" id="{{ prefix }}LineSpacing" type="number" min="0.8" max="2" step="0.05"
-               data-setting-key="{{ line_key }}" value="{{ export_settings[line_key] }}">
-        <span class="input-group-text">x</span>
+      <div>
+        <label class="form-label small fw-semibold" for="{{ prefix }}Size">Size</label>
+        <div class="input-group input-group-sm">
+          <input class="form-control export-setting-input" id="{{ prefix }}Size" type="number" min="5" max="24" step="0.1"
+                 data-setting-key="{{ size_key }}" value="{{ export_settings[size_key] }}">
+          <span class="input-group-text">pt</span>
+        </div>
       </div>
-    </div>
-    <div>
-      <label class="form-label small fw-semibold" for="{{ prefix }}Kerning">Kerning</label>
-      <div class="input-group input-group-sm">
-        <input class="form-control export-setting-input" id="{{ prefix }}Kerning" type="number" min="-1" max="2" step="0.05"
-               data-setting-key="{{ kerning_key }}" value="{{ export_settings[kerning_key] }}">
-        <span class="input-group-text">pt</span>
+      <div>
+        <label class="form-label small fw-semibold" for="{{ prefix }}LineSpacing">Line</label>
+        <div class="input-group input-group-sm">
+          <input class="form-control export-setting-input" id="{{ prefix }}LineSpacing" type="number" min="0.8" max="2" step="0.05"
+                 data-setting-key="{{ line_key }}" value="{{ export_settings[line_key] }}">
+          <span class="input-group-text">x</span>
+        </div>
       </div>
-    </div>
-    <div>
-      <div class="d-flex align-items-center justify-content-between gap-2">
-        <label class="form-label small fw-semibold" for="{{ prefix }}Gray">Gray</label>
-        <span class="small text-muted" id="{{ prefix }}GrayValue">{{ export_settings[gray_key] }}</span>
+      <div>
+        <label class="form-label small fw-semibold" for="{{ prefix }}Kerning">Kerning</label>
+        <div class="input-group input-group-sm">
+          <input class="form-control export-setting-input" id="{{ prefix }}Kerning" type="number" min="-1" max="2" step="0.05"
+                 data-setting-key="{{ kerning_key }}" value="{{ export_settings[kerning_key] }}">
+          <span class="input-group-text">pt</span>
+        </div>
       </div>
-      <div class="d-flex align-items-center gap-2">
-        <span class="export-gray-swatch" data-gray-swatch="{{ prefix }}" style="--gray-level: {{ export_settings[gray_key] }}%;"></span>
-        <input class="form-range export-setting-input export-gray-input" id="{{ prefix }}Gray" type="range" min="0" max="90" step="1"
-               data-setting-key="{{ gray_key }}" data-gray-value="{{ prefix }}GrayValue" data-gray-swatch="{{ prefix }}"
-               value="{{ export_settings[gray_key] }}">
+      {% if alignment_key %}
+      <div>
+        <label class="form-label small fw-semibold" for="{{ prefix }}Alignment">Alignment</label>
+        <select class="form-select form-select-sm export-setting-input" id="{{ prefix }}Alignment" data-setting-key="{{ alignment_key }}">
+          <option value="left" {% if export_settings[alignment_key] == 'left' %}selected{% endif %}>Left</option>
+          <option value="center" {% if export_settings[alignment_key] == 'center' %}selected{% endif %}>Center</option>
+          <option value="right" {% if export_settings[alignment_key] == 'right' %}selected{% endif %}>Right</option>
+          <option value="justify" {% if export_settings[alignment_key] == 'justify' %}selected{% endif %}>Justified</option>
+        </select>
       </div>
+      {% endif %}
+      <div>
+        <div class="d-flex align-items-center justify-content-between gap-2">
+          <label class="form-label small fw-semibold" for="{{ prefix }}Gray">Gray</label>
+          <span class="small text-muted" id="{{ prefix }}GrayValue">{{ export_settings[gray_key] }}</span>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="export-gray-swatch" data-gray-swatch="{{ prefix }}" style="--gray-level: {{ export_settings[gray_key] }}%;"></span>
+          <input class="form-range export-setting-input export-gray-input" id="{{ prefix }}Gray" type="range" min="0" max="90" step="1"
+                 data-setting-key="{{ gray_key }}" data-gray-value="{{ prefix }}GrayValue" data-gray-swatch="{{ prefix }}"
+                 value="{{ export_settings[gray_key] }}">
+        </div>
+      </div>
+      {% if bold_key or italic_key %}
+      <div class="export-style-switches">
+        {% if bold_key %}
+        <div class="form-check form-switch mb-1">
+          <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+                 id="{{ prefix }}Bold" data-setting-key="{{ bold_key }}" value="1"
+                 {% if export_settings[bold_key] in ['1', 'true', 'on'] %}checked{% endif %}>
+          <label class="form-check-label small fw-semibold" for="{{ prefix }}Bold">Bold</label>
+        </div>
+        {% endif %}
+        {% if italic_key %}
+        <div class="form-check form-switch mb-1">
+          <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+                 id="{{ prefix }}Italic" data-setting-key="{{ italic_key }}" value="1"
+                 {% if export_settings[italic_key] in ['1', 'true', 'on'] %}checked{% endif %}>
+          <label class="form-check-label small fw-semibold" for="{{ prefix }}Italic">Italic</label>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% for field in extra_fields %}
+      <div>
+        <label class="form-label small fw-semibold" for="{{ field.id }}">{{ field.label }}</label>
+        <div class="input-group input-group-sm">
+          <input class="form-control export-setting-input" id="{{ field.id }}" type="number"
+                 min="{{ field.min }}" max="{{ field.max }}" step="{{ field.step }}"
+                 data-setting-key="{{ field.key }}" value="{{ export_settings[field.key] }}">
+          {% if field.unit %}
+          <span class="input-group-text">{{ field.unit }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
     </div>
   </div>
 </div>
@@ -101,86 +147,6 @@
                 </div>
               </div>
               <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportBookAlignment">Book text alignment</label>
-                <select class="form-select form-select-sm export-setting-input" id="exportBookAlignment" data-setting-key="export_book_alignment">
-                  <option value="left" {% if export_settings.export_book_alignment == 'left' %}selected{% endif %}>Left</option>
-                  <option value="justify" {% if export_settings.export_book_alignment == 'justify' %}selected{% endif %}>Justified</option>
-                  <option value="center" {% if export_settings.export_book_alignment == 'center' %}selected{% endif %}>Centered</option>
-                </select>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportDefinitionAlignment">Definition alignment</label>
-                <select class="form-select form-select-sm export-setting-input" id="exportDefinitionAlignment" data-setting-key="export_definition_alignment">
-                  <option value="left" {% if export_settings.export_definition_alignment == 'left' %}selected{% endif %}>Left</option>
-                  <option value="justify" {% if export_settings.export_definition_alignment == 'justify' %}selected{% endif %}>Justified</option>
-                  <option value="center" {% if export_settings.export_definition_alignment == 'center' %}selected{% endif %}>Centered</option>
-                </select>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportCommentaryAlignment">Commentary alignment</label>
-                <select class="form-select form-select-sm export-setting-input" id="exportCommentaryAlignment" data-setting-key="export_commentary_alignment">
-                  <option value="left" {% if export_settings.export_commentary_alignment == 'left' %}selected{% endif %}>Left</option>
-                  <option value="justify" {% if export_settings.export_commentary_alignment == 'justify' %}selected{% endif %}>Justified</option>
-                  <option value="center" {% if export_settings.export_commentary_alignment == 'center' %}selected{% endif %}>Centered</option>
-                </select>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportMarginTop">Top margin</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportMarginTop" type="number" min="0.1" max="2" step="0.05"
-                         data-setting-key="export_margin_top" value="{{ export_settings.export_margin_top }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportMarginBottom">Bottom margin</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportMarginBottom" type="number" min="0.1" max="2" step="0.05"
-                         data-setting-key="export_margin_bottom" value="{{ export_settings.export_margin_bottom }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportChapterGap">Below chapter</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportChapterGap" type="number" min="0.1" max="2" step="0.05"
-                         data-setting-key="export_chapter_gap" value="{{ export_settings.export_chapter_gap }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportPageNumberGap">Above page number</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportPageNumberGap" type="number" min="0.1" max="1.5" step="0.05"
-                         data-setting-key="export_page_number_gap" value="{{ export_settings.export_page_number_gap }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportRuleMarginAbove">Above rule</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportRuleMarginAbove" type="number" min="0" max="0.75" step="0.01"
-                         data-setting-key="export_rule_margin_above" value="{{ export_settings.export_rule_margin_above }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportSectionGap">Main-to-rule gap</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportSectionGap" type="number" min="0" max="1" step="0.01"
-                         data-setting-key="export_section_gap" value="{{ export_settings.export_section_gap }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportRuleMarginBelow">Below rule</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportRuleMarginBelow" type="number" min="0" max="0.75" step="0.01"
-                         data-setting-key="export_rule_margin_below" value="{{ export_settings.export_rule_margin_below }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
-              <div class="col-sm-6">
                 <label class="form-label small fw-semibold" for="exportInsideMargin">Gutter</label>
                 <div class="input-group input-group-sm">
                   <input class="form-control export-setting-input" id="exportInsideMargin" type="number" min="0.1" max="2" step="0.05"
@@ -212,30 +178,54 @@
                   <span class="input-group-text">ratio</span>
                 </div>
               </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportCommentaryColumns">Commentary columns</label>
-                <input class="form-control form-control-sm export-setting-input" id="exportCommentaryColumns" type="number" min="1" max="4" step="1"
-                       data-setting-key="export_commentary_columns" value="{{ export_settings.export_commentary_columns }}">
-              </div>
-              <div class="col-sm-6">
-                <label class="form-label small fw-semibold" for="exportCommentaryColumnGutter">Commentary gutter</label>
-                <div class="input-group input-group-sm">
-                  <input class="form-control export-setting-input" id="exportCommentaryColumnGutter" type="number" min="0.05" max="1" step="0.01"
-                         data-setting-key="export_commentary_column_gutter" value="{{ export_settings.export_commentary_column_gutter }}">
-                  <span class="input-group-text">in</span>
-                </div>
-              </div>
             </div>
           </div>
 
           <div class="tab-pane fade" id="fontSettingsPane" role="tabpanel" aria-labelledby="fontSettingsTab">
-            <div class="export-font-list">
-              {{ font_section('Book Text', 'bookText', 'export_book_font_size', 'export_book_font', 'export_book_gray', 'export_book_line_spacing', 'export_book_kerning') }}
-              {{ font_section('Definitions', 'definitions', 'export_definition_font_size', 'export_definition_font', 'export_definition_gray', 'export_definition_line_spacing', 'export_definition_kerning') }}
-              {{ font_section('Commentary', 'commentary', 'export_commentary_font_size', 'export_commentary_font', 'export_commentary_gray', 'export_commentary_line_spacing', 'export_commentary_kerning') }}
-              {{ font_section('References', 'references', 'export_annotation_font_size', 'export_annotation_font', 'export_annotation_gray', 'export_annotation_line_spacing', 'export_annotation_kerning') }}
-              {{ font_section('Chapter', 'chapter', 'export_chapter_font_size', 'export_chapter_font', 'export_chapter_gray', 'export_chapter_line_spacing', 'export_chapter_kerning') }}
-              {{ font_section('Page Number', 'pageNumber', 'export_page_number_font_size', 'export_page_number_font', 'export_page_number_gray', 'export_page_number_line_spacing', 'export_page_number_kerning') }}
+            <ul class="nav nav-pills nav-sm export-typography-tabs" id="exportTypographyTabs" role="tablist">
+              {% for pane_id, label in [
+                ('bookText', 'Book'),
+                ('definitions', 'Definitions'),
+                ('commentary', 'Commentary'),
+                ('references', 'References'),
+                ('chapter', 'Page Header'),
+                ('pageNumber', 'Page No.'),
+                ('titleFormat', 'Title'),
+                ('subtitleFormat', 'Subtitle'),
+                ('contentChapterFormat', 'Chapter'),
+                ('headerFormat', 'Header')
+              ] %}
+              <li class="nav-item" role="presentation">
+                <button class="nav-link{% if loop.first %} active{% endif %}" id="{{ pane_id }}TypographyTab"
+                        data-bs-toggle="tab" data-bs-target="#{{ pane_id }}TypographyPane" type="button" role="tab">
+                  {{ label }}
+                </button>
+              </li>
+              {% endfor %}
+            </ul>
+            <div class="export-font-list tab-content">
+              {{ typography_section('Book Text', 'bookText', 'export_book_font_size', 'export_book_font', 'export_book_gray', 'export_book_line_spacing', 'export_book_kerning', 'export_book_alignment') }}
+              {{ typography_section('Definitions', 'definitions', 'export_definition_font_size', 'export_definition_font', 'export_definition_gray', 'export_definition_line_spacing', 'export_definition_kerning', 'export_definition_alignment') }}
+              {{ typography_section('Commentary', 'commentary', 'export_commentary_font_size', 'export_commentary_font', 'export_commentary_gray', 'export_commentary_line_spacing', 'export_commentary_kerning', 'export_commentary_alignment', extra_fields=[
+                {'id': 'exportSectionGap', 'label': 'Main-to-rule gap', 'key': 'export_section_gap', 'min': '0', 'max': '1', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportRuleMarginAbove', 'label': 'Above rule', 'key': 'export_rule_margin_above', 'min': '0', 'max': '0.75', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportRuleMarginBelow', 'label': 'Below rule', 'key': 'export_rule_margin_below', 'min': '0', 'max': '0.75', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportCommentaryColumns', 'label': 'Columns', 'key': 'export_commentary_columns', 'min': '1', 'max': '4', 'step': '1', 'unit': ''},
+                {'id': 'exportCommentaryColumnGutter', 'label': 'Column gutter', 'key': 'export_commentary_column_gutter', 'min': '0.05', 'max': '1', 'step': '0.01', 'unit': 'in'}
+              ]) }}
+              {{ typography_section('References', 'references', 'export_annotation_font_size', 'export_annotation_font', 'export_annotation_gray', 'export_annotation_line_spacing', 'export_annotation_kerning', 'export_annotation_alignment') }}
+              {{ typography_section('Page Header', 'chapter', 'export_chapter_font_size', 'export_chapter_font', 'export_chapter_gray', 'export_chapter_line_spacing', 'export_chapter_kerning', bold_key='export_chapter_bold', italic_key='export_chapter_italic', extra_fields=[
+                {'id': 'exportMarginTop', 'label': 'Top margin', 'key': 'export_margin_top', 'min': '0.1', 'max': '2', 'step': '0.05', 'unit': 'in'},
+                {'id': 'exportChapterGap', 'label': 'Below header', 'key': 'export_chapter_gap', 'min': '0.1', 'max': '2', 'step': '0.05', 'unit': 'in'}
+              ]) }}
+              {{ typography_section('Page Number', 'pageNumber', 'export_page_number_font_size', 'export_page_number_font', 'export_page_number_gray', 'export_page_number_line_spacing', 'export_page_number_kerning', bold_key='export_page_number_bold', italic_key='export_page_number_italic', extra_fields=[
+                {'id': 'exportMarginBottom', 'label': 'Bottom margin', 'key': 'export_margin_bottom', 'min': '0.1', 'max': '2', 'step': '0.05', 'unit': 'in'},
+                {'id': 'exportPageNumberGap', 'label': 'Above page number', 'key': 'export_page_number_gap', 'min': '0.1', 'max': '1.5', 'step': '0.05', 'unit': 'in'}
+              ]) }}
+              {{ typography_section('Title', 'titleFormat', 'export_title_font_size', 'export_title_font', 'export_title_gray', 'export_title_line_spacing', 'export_title_kerning', 'export_title_alignment', 'export_title_bold', 'export_title_italic') }}
+              {{ typography_section('Subtitle', 'subtitleFormat', 'export_subtitle_font_size', 'export_subtitle_font', 'export_subtitle_gray', 'export_subtitle_line_spacing', 'export_subtitle_kerning', 'export_subtitle_alignment', 'export_subtitle_bold', 'export_subtitle_italic') }}
+              {{ typography_section('Chapter', 'contentChapterFormat', 'export_content_chapter_font_size', 'export_content_chapter_font', 'export_content_chapter_gray', 'export_content_chapter_line_spacing', 'export_content_chapter_kerning', 'export_content_chapter_alignment', 'export_content_chapter_bold', 'export_content_chapter_italic') }}
+              {{ typography_section('Header', 'headerFormat', 'export_header_font_size', 'export_header_font', 'export_header_gray', 'export_header_line_spacing', 'export_header_kerning', 'export_header_alignment', 'export_header_bold', 'export_header_italic') }}
             </div>
           </div>
         </div>
@@ -247,9 +237,14 @@
         <div class="card-header d-flex align-items-center justify-content-between gap-3">
           <span>PDF Preview</span>
           {% if preview_pdf_url %}
+          <div class="d-flex align-items-center gap-2">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.export_book_pdf', book_id=preview_book.id) }}" target="_blank" rel="noopener">
+              <i class="bi bi-file-earmark-pdf me-1"></i>Whole Book
+            </a>
             <a class="btn btn-sm btn-outline-secondary" href="{{ preview_pdf_url }}" target="_blank" rel="noopener">
               <i class="bi bi-box-arrow-up-right me-1"></i>Open
             </a>
+          </div>
           {% endif %}
         </div>
         <div class="card-body">

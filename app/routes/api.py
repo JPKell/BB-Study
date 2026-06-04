@@ -7,11 +7,14 @@ from collections import defaultdict
 from flask import Blueprint, jsonify, request
 from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, BookLocation,
                       DictionaryLookup, BookReference, BookContent, BookContentFormat,
-                      BookTableOfContents, ContentTopic, Commentary, Source,
+                      BookPageFormat, BookTableOfContents, ContentTopic, Commentary, Source,
                       Topic)
+from ..page_numbers import populate_book_relative_page_numbers
 from .. import db
 
 api_bp = Blueprint('api', __name__)
+CONTENT_FORMAT_ROLES = {'body', 'title', 'subtitle', 'chapter', 'header', 'poetry'}
+CONTENT_FORMAT_ALIGNMENTS = {'', 'left', 'center', 'right', 'justify'}
 
 
 def _err(msg, code=400):
@@ -988,7 +991,8 @@ def list_book_content():
         q = q.filter_by(chapter_name=chapter_name)
     if content_mode:
         q = q.filter_by(content_mode=content_mode)
-    results = q.order_by(BookContent.chapter_number, BookContent.chapter_name, BookContent.page,
+    results = q.order_by(BookContent.chapter_number, BookContent.chapter_name, BookContent.relative_page_number,
+                         BookContent.page,
                          BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id).all()
     return jsonify([r.to_dict() for r in results])
 
@@ -1012,6 +1016,7 @@ def create_book_content():
     )
     db.session.add(bc)
     db.session.commit()
+    populate_book_relative_page_numbers(bc.book_id)
     return _ok(bc.to_dict(), 'Content created'), 201
 
 
@@ -1023,6 +1028,7 @@ def get_book_content(cid):
 @api_bp.route('/book-content/<int:cid>', methods=['PUT'])
 def update_book_content(cid):
     bc = BookContent.query.get_or_404(cid)
+    original_book_id = bc.book_id
     data = request.get_json(force=True) or {}
     for field in ('book_id', 'content_mode', 'chapter_number', 'chapter_name', 'chapter', 'page', 'paragraph', 'line', 'verse', 'content'):
         if field in data:
@@ -1030,7 +1036,179 @@ def update_book_content(cid):
     if 'chapter_name' in data and 'chapter' not in data:
         bc.chapter = data['chapter_name']
     db.session.commit()
+    populate_book_relative_page_numbers(bc.book_id)
+    if original_book_id != bc.book_id:
+        populate_book_relative_page_numbers(original_book_id)
     return _ok(bc.to_dict())
+
+
+@api_bp.route('/book-content/<int:cid>/split', methods=['POST'])
+def split_book_content(cid):
+    bc = BookContent.query.get_or_404(cid)
+    data = request.get_json(force=True) or {}
+    left, right = _split_content_parts(bc.content or '', data)
+    if not left or not right:
+        return _err('Both sides of the split must contain text')
+
+    original_format = None
+    if bc.verse is not None:
+        original_format = BookContentFormat.query.filter_by(
+            book_id=bc.book_id,
+            page=bc.page,
+            paragraph=bc.paragraph,
+            verse=bc.verse,
+        ).first()
+
+    new_verse = None
+    new_line = bc.line
+    if bc.verse is not None:
+        new_verse = bc.verse + 1
+        continuation_rows = _same_verse_rows_after(bc)
+        _shift_book_content_verses(bc.book_id, bc.page, bc.paragraph, bc.verse)
+        for row in continuation_rows:
+            row.verse = new_verse
+    elif bc.line is not None:
+        new_line = bc.line + 1
+        _shift_book_content_lines(bc.book_id, bc.page, bc.paragraph, bc.line)
+    else:
+        return _err('Selected content must have a verse or line number to split')
+
+    bc.content = left
+    new_row = BookContent(
+        book_id=bc.book_id,
+        content_mode=bc.content_mode,
+        chapter_number=bc.chapter_number,
+        chapter_name=bc.chapter_name,
+        chapter=bc.chapter,
+        page=bc.page,
+        paragraph=bc.paragraph,
+        line=new_line,
+        verse=new_verse,
+        content=right,
+    )
+    db.session.add(new_row)
+    db.session.flush()
+
+    if original_format and new_verse is not None:
+        db.session.add(BookContentFormat(
+            book_id=bc.book_id,
+            page=bc.page,
+            paragraph=bc.paragraph,
+            verse=new_verse,
+            is_bold=original_format.is_bold,
+            is_italic=original_format.is_italic,
+            content_role=original_format.content_role or 'body',
+            alignment_override=original_format.alignment_override,
+        ))
+
+    db.session.commit()
+    populate_book_relative_page_numbers(bc.book_id)
+    return _ok({'left': bc.to_dict(), 'right': new_row.to_dict()}, 'Content split')
+
+
+def _same_verse_rows_after(row):
+    if row.verse is None:
+        return []
+    rows = (BookContent.query
+            .filter(BookContent.book_id == row.book_id,
+                    BookContent.page == row.page,
+                    BookContent.paragraph == row.paragraph,
+                    BookContent.verse == row.verse,
+                    BookContent.id != row.id)
+            .order_by(BookContent.line, BookContent.id)
+            .all())
+
+    def after_split(candidate):
+        if row.line is None or candidate.line is None:
+            return candidate.id > row.id
+        return (candidate.line, candidate.id) > (row.line, row.id)
+
+    return [candidate for candidate in rows if after_split(candidate)]
+
+
+def _split_content_parts(original, data):
+    marker_text = data.get('marker_text')
+    if marker_text is not None:
+        if str(marker_text).count('|') != 1:
+            return '', ''
+        left, right = str(marker_text).split('|', 1)
+        return left.strip(), right.strip()
+
+    if 'left' in data or 'right' in data:
+        return str(data.get('left') or '').strip(), str(data.get('right') or '').strip()
+
+    try:
+        offset = int(data.get('offset'))
+    except (TypeError, ValueError):
+        return '', ''
+    if offset <= 0 or offset >= len(original):
+        return '', ''
+    return original[:offset].strip(), original[offset:].strip()
+
+
+def _shift_book_content_verses(book_id, page, paragraph, after_verse):
+    rows = (BookContent.query
+            .filter(BookContent.book_id == book_id,
+                    BookContent.page == page,
+                    BookContent.paragraph == paragraph,
+                    BookContent.verse > after_verse)
+            .order_by(BookContent.verse.desc(), BookContent.id.desc())
+            .all())
+    for row in rows:
+        row.verse += 1
+
+    formats = (BookContentFormat.query
+               .filter(BookContentFormat.book_id == book_id,
+                       BookContentFormat.page == page,
+                       BookContentFormat.paragraph == paragraph,
+                       BookContentFormat.verse > after_verse)
+               .order_by(BookContentFormat.verse.desc(), BookContentFormat.id.desc())
+               .all())
+    for fmt in formats:
+        fmt.verse += 1
+        db.session.flush()
+
+    for row in Commentary.query.filter(Commentary.book_id == book_id,
+                                       Commentary.page == page,
+                                       Commentary.paragraph == paragraph,
+                                       Commentary.verse > after_verse).all():
+        row.verse += 1
+
+    for row in Source.query.filter(Source.book_id == book_id,
+                                   Source.page == page,
+                                   Source.paragraph == paragraph,
+                                   Source.verse > after_verse).all():
+        row.verse += 1
+
+    for row in BookReference.query.filter(BookReference.source_book_id == book_id,
+                                          BookReference.source_page == page,
+                                          BookReference.source_paragraph == paragraph,
+                                          BookReference.source_verse > after_verse).all():
+        row.source_verse += 1
+
+    for row in BookReference.query.filter(BookReference.target_book_id == book_id,
+                                          BookReference.target_page == page,
+                                          BookReference.target_paragraph == paragraph,
+                                          BookReference.target_verse > after_verse).all():
+        row.target_verse += 1
+
+    for location in BookLocation.query.filter(BookLocation.book_id == book_id,
+                                              BookLocation.page == page,
+                                              BookLocation.paragraph == paragraph,
+                                              BookLocation.line_number > after_verse).all():
+        location.line_number += 1
+
+
+def _shift_book_content_lines(book_id, page, paragraph, after_line):
+    rows = (BookContent.query
+            .filter(BookContent.book_id == book_id,
+                    BookContent.page == page,
+                    BookContent.paragraph == paragraph,
+                    BookContent.line > after_line)
+            .order_by(BookContent.line.desc(), BookContent.id.desc())
+            .all())
+    for row in rows:
+        row.line += 1
 
 
 @api_bp.route('/book-content/<int:cid>', methods=['DELETE'])
@@ -1068,12 +1246,18 @@ def upsert_book_content_format():
     page = str(data['page'])
     is_bold = bool(data.get('is_bold', False))
     is_italic = bool(data.get('is_italic', False))
+    content_role = data.get('content_role') or 'body'
+    if content_role not in CONTENT_FORMAT_ROLES:
+        return _err('content_role must be body, title, subtitle, chapter, header, or poetry')
+    alignment_override = data.get('alignment_override') or ''
+    if alignment_override not in CONTENT_FORMAT_ALIGNMENTS:
+        return _err('alignment_override must be default, left, center, right, or justify')
 
     fmt = BookContentFormat.query.filter_by(
         book_id=book_id, page=page, paragraph=paragraph, verse=verse
     ).first()
 
-    if not is_bold and not is_italic:
+    if not is_bold and not is_italic and content_role == 'body' and not alignment_override:
         if fmt:
             db.session.delete(fmt)
             db.session.commit()
@@ -1084,6 +1268,8 @@ def upsert_book_content_format():
             'verse': verse,
             'is_bold': False,
             'is_italic': False,
+            'content_role': 'body',
+            'alignment_override': '',
         }, 'Content format cleared')
 
     if not fmt:
@@ -1091,8 +1277,52 @@ def upsert_book_content_format():
         db.session.add(fmt)
     fmt.is_bold = is_bold
     fmt.is_italic = is_italic
+    fmt.content_role = content_role
+    fmt.alignment_override = alignment_override or None
     db.session.commit()
     return _ok(fmt.to_dict(), 'Content format saved')
+
+
+@api_bp.route('/book-page-format', methods=['GET'])
+def get_book_page_format():
+    book_id = request.args.get('book_id', type=int)
+    page = request.args.get('page', type=str)
+    if not book_id or not page:
+        return _err('book_id and page are required')
+    fmt = BookPageFormat.query.filter_by(book_id=book_id, page=str(page)).first()
+    if fmt:
+        return jsonify(fmt.to_dict())
+    return jsonify({
+        'book_id': book_id,
+        'page': str(page),
+        'centered_export': False,
+    })
+
+
+@api_bp.route('/book-page-format', methods=['PUT'])
+def upsert_book_page_format():
+    data = request.get_json(force=True) or {}
+    if not data.get('book_id') or not data.get('page'):
+        return _err('book_id and page are required')
+    book_id = int(data['book_id'])
+    page = str(data['page'])
+    centered_export = bool(data.get('centered_export', False))
+    fmt = BookPageFormat.query.filter_by(book_id=book_id, page=page).first()
+    if not centered_export:
+        if fmt:
+            db.session.delete(fmt)
+            db.session.commit()
+        return _ok({
+            'book_id': book_id,
+            'page': page,
+            'centered_export': False,
+        }, 'Page format cleared')
+    if not fmt:
+        fmt = BookPageFormat(book_id=book_id, page=page)
+        db.session.add(fmt)
+    fmt.centered_export = centered_export
+    db.session.commit()
+    return _ok(fmt.to_dict(), 'Page format saved')
 
 
 # ── Book Table of Contents ───────────────────────────────────────────────────

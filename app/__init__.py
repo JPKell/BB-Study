@@ -71,6 +71,11 @@ def _sync_sqlite_schema():
         db.session.execute(text('ALTER TABLE book_content ADD COLUMN verse INTEGER'))
         db.session.execute(text('UPDATE book_content SET verse = line WHERE verse IS NULL'))
         db.session.commit()
+    if 'relative_page_number' not in content_columns:
+        db.session.execute(text('ALTER TABLE book_content ADD COLUMN relative_page_number INTEGER'))
+        db.session.commit()
+    from .page_numbers import populate_book_relative_page_numbers
+    populate_book_relative_page_numbers()
     db.session.execute(text(
         'CREATE TABLE IF NOT EXISTS book_content_formats ('
         'id INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -80,10 +85,32 @@ def _sync_sqlite_schema():
         'verse INTEGER, '
         'is_bold BOOLEAN NOT NULL DEFAULT 0, '
         'is_italic BOOLEAN NOT NULL DEFAULT 0, '
+        "content_role VARCHAR(30) NOT NULL DEFAULT 'body', "
+        'alignment_override VARCHAR(20), '
         'created_at DATETIME, '
         'updated_at DATETIME, '
         'FOREIGN KEY(book_id) REFERENCES books(id), '
         'CONSTRAINT uq_book_content_format_location UNIQUE (book_id, page, paragraph, verse)'
+        ')'
+    ))
+    db.session.commit()
+    format_columns = {col['name'] for col in inspector.get_columns('book_content_formats')}
+    if 'content_role' not in format_columns:
+        db.session.execute(text("ALTER TABLE book_content_formats ADD COLUMN content_role VARCHAR(30) NOT NULL DEFAULT 'body'"))
+        db.session.commit()
+    if 'alignment_override' not in format_columns:
+        db.session.execute(text('ALTER TABLE book_content_formats ADD COLUMN alignment_override VARCHAR(20)'))
+        db.session.commit()
+    db.session.execute(text(
+        'CREATE TABLE IF NOT EXISTS book_page_formats ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'book_id INTEGER NOT NULL, '
+        'page VARCHAR(20) NOT NULL, '
+        'centered_export BOOLEAN NOT NULL DEFAULT 0, '
+        'created_at DATETIME, '
+        'updated_at DATETIME, '
+        'FOREIGN KEY(book_id) REFERENCES books(id), '
+        'CONSTRAINT uq_book_page_format_location UNIQUE (book_id, page)'
         ')'
     ))
     db.session.commit()
@@ -192,6 +219,43 @@ def _seed_settings():
         'export_book_alignment': 'justify',
         'export_definition_alignment': 'left',
         'export_commentary_alignment': 'left',
+        'export_annotation_alignment': 'left',
+        'export_title_alignment': 'center',
+        'export_subtitle_alignment': 'center',
+        'export_content_chapter_alignment': 'center',
+        'export_header_alignment': 'left',
+        'export_title_font_size': '14',
+        'export_subtitle_font_size': '12',
+        'export_content_chapter_font_size': '12',
+        'export_header_font_size': '10.5',
+        'export_title_bold': '1',
+        'export_title_italic': '0',
+        'export_subtitle_bold': '0',
+        'export_subtitle_italic': '1',
+        'export_content_chapter_bold': '1',
+        'export_content_chapter_italic': '0',
+        'export_header_bold': '1',
+        'export_header_italic': '0',
+        'export_title_line_spacing': '1.2',
+        'export_subtitle_line_spacing': '1.2',
+        'export_content_chapter_line_spacing': '1.2',
+        'export_header_line_spacing': '1.2',
+        'export_title_kerning': '0',
+        'export_subtitle_kerning': '0',
+        'export_content_chapter_kerning': '0',
+        'export_header_kerning': '0',
+        'export_title_font': 'Times-Roman',
+        'export_subtitle_font': 'Times-Roman',
+        'export_content_chapter_font': 'Helvetica',
+        'export_header_font': 'Helvetica',
+        'export_title_gray': '0',
+        'export_subtitle_gray': '15',
+        'export_content_chapter_gray': '0',
+        'export_header_gray': '20',
+        'export_chapter_bold': '0',
+        'export_chapter_italic': '0',
+        'export_page_number_bold': '0',
+        'export_page_number_italic': '0',
         'export_margin_top': '0.45',
         'export_margin_bottom': '0.45',
         'export_chapter_gap': '0.46',

@@ -253,6 +253,7 @@ class BookContent(db.Model):
     chapter_name = db.Column(db.String(100))
     chapter = db.Column(db.String(100))
     page = db.Column(db.String(20))
+    relative_page_number = db.Column(db.Integer)
     paragraph = db.Column(db.Integer)
     line = db.Column(db.Integer)
     verse = db.Column(db.Integer)
@@ -273,6 +274,7 @@ class BookContent(db.Model):
             'chapter_name': self.chapter_name or self.chapter,
             'chapter': self.chapter,
             'page': self.page,
+            'relative_page_number': self.relative_page_number,
             'paragraph': self.paragraph,
             'line': self.line,
             'verse': self.verse,
@@ -291,6 +293,8 @@ class BookContentFormat(db.Model):
     verse = db.Column(db.Integer)
     is_bold = db.Column(db.Boolean, nullable=False, default=False)
     is_italic = db.Column(db.Boolean, nullable=False, default=False)
+    content_role = db.Column(db.String(30), nullable=False, default='body')
+    alignment_override = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -309,6 +313,8 @@ class BookContentFormat(db.Model):
             'verse': self.verse,
             'is_bold': self.is_bold,
             'is_italic': self.is_italic,
+            'content_role': self.content_role or 'body',
+            'alignment_override': self.alignment_override or '',
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -387,6 +393,31 @@ class ContentTopic(db.Model):
             'notes': self.notes,
             'rank': self.rank,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class BookPageFormat(db.Model):
+    """Page-level presentation choices for exported/read book pages."""
+    __tablename__ = 'book_page_formats'
+    id = db.Column(db.Integer, primary_key=True)
+    book_id = db.Column(db.Integer, db.ForeignKey('books.id'), nullable=False)
+    page = db.Column(db.String(20), nullable=False)
+    centered_export = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('book_id', 'page', name='uq_book_page_format_location'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'book_id': self.book_id,
+            'page': self.page,
+            'centered_export': bool(self.centered_export),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from io import BytesIO
 import re
@@ -10,8 +10,8 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 
-from ..models import (Book, BookContent, BookContentFormat, BookLocation, BookReference,
-                      Commentary, DictionaryLookup, Source)
+from ..models import (Book, BookContent, BookContentFormat, BookLocation, BookPageFormat,
+                      BookReference, Commentary, DictionaryLookup, Source)
 
 
 @dataclass
@@ -22,6 +22,7 @@ class TextStyle:
     leading: float = 14
     char_spacing: float = 0
     color: colors.Color = colors.black
+    role_styles: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -41,6 +42,8 @@ class ExportLayout:
     book_alignment: str = 'justify'
     definition_alignment: str = 'left'
     commentary_alignment: str = 'left'
+    annotation_alignment: str = 'left'
+    content_role_styles: dict = field(default_factory=dict)
     section_gap: float = 0.18 * inch
     header_gap: float = 0.46 * inch
     rule_margin_above: float = 0.04 * inch
@@ -67,6 +70,10 @@ class ExportLayout:
     annotation_kerning: float = 0
     chapter_font: str = 'Helvetica'
     page_number_font: str = 'Helvetica'
+    chapter_bold: bool = False
+    chapter_italic: bool = False
+    page_number_bold: bool = False
+    page_number_italic: bool = False
     book_font: str = 'Times-Roman'
     definition_font: str = 'Helvetica'
     commentary_font: str = 'Helvetica'
@@ -83,6 +90,7 @@ class ExportLayout:
 class PageExportData:
     book: Book
     page: str
+    relative_page_number: int | None
     chapter: str
     content_rows: list
     format_map: dict
@@ -93,6 +101,7 @@ class PageExportData:
     commentary_markers: dict
     references: list
     sources: list
+    page_format: BookPageFormat | None = None
 
 
 def export_page_pdf(book_id, page, layout=None):
@@ -101,6 +110,7 @@ def export_page_pdf(book_id, page, layout=None):
     data = collect_page_export_data(book_id, page)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=layout.page_size)
+    set_pdf_title(pdf, [data])
     render_page_export(pdf, data, layout)
     pdf.save()
     buffer.seek(0)
@@ -112,14 +122,44 @@ def export_pages_pdf(book_id, pages, layout=None):
     layout = layout or ExportLayout()
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=layout.page_size)
+    title_data = []
     for index, page in enumerate(pages):
         if index:
             pdf.showPage()
+        if page is None:
+            if index == 0:
+                title_data = [collect_page_export_data(book_id, title_page) for title_page in pages if title_page is not None]
+                set_pdf_title(pdf, title_data)
+            render_blank_export_page(pdf, layout)
+            continue
         data = collect_page_export_data(book_id, page)
+        if index == 0:
+            title_data = [data]
+            for title_page in pages[1:]:
+                if title_page is not None:
+                    title_data.append(collect_page_export_data(book_id, title_page))
+            set_pdf_title(pdf, title_data)
         render_page_export(pdf, data, layout)
     pdf.save()
     buffer.seek(0)
     return buffer
+
+
+def set_pdf_title(pdf, pages):
+    if not pages:
+        return
+    book_title = pages[0].book.title if pages[0].book else 'Export'
+    page_label = '-'.join(str(page.page) for page in pages if page)
+    chapter_titles = []
+    for page in pages:
+        title = page.chapter or page.book.title
+        if title and title not in chapter_titles:
+            chapter_titles.append(title)
+    title_bits = [book_title]
+    if chapter_titles:
+        title_bits.append(' / '.join(chapter_titles))
+    title_bits.append(f'page {page_label}')
+    pdf.setTitle(' - '.join(title_bits))
 
 
 def collect_page_export_data(book_id, page):
@@ -129,6 +169,7 @@ def collect_page_export_data(book_id, page):
             .order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id)
             .all())
     chapter = next((r.chapter_name or r.chapter for r in rows if r.chapter_name or r.chapter), '')
+    relative_page_number = next((r.relative_page_number for r in rows if r.relative_page_number), None)
     commentary = (Commentary.query
                   .filter_by(book_id=book_id, page=page)
                   .order_by(Commentary.created_at)
@@ -152,17 +193,68 @@ def collect_page_export_data(book_id, page):
                        .all())
 
     format_map = collect_content_formats(book_id, page)
-    data = PageExportData(book, str(page), chapter, rows, format_map, [], definitions,
-                          commentary, [], {}, references, sources)
+    page_format = BookPageFormat.query.filter_by(book_id=book_id, page=str(page)).first()
+    data = PageExportData(book, str(page), relative_page_number, chapter, rows, format_map, [], definitions,
+                          commentary, [], {}, references, sources, page_format)
     refresh_commentary_export(data)
     return data
 
 
 def refresh_commentary_export(data):
-    commentary_items, commentary_markers = build_commentary_markers(sort_ranked_items(data.commentary_rows))
+    _, fallback_location = page_location_order(data.content_rows)
+    commentary_items, commentary_markers = build_annotation_markers(
+        annotation_note_rows(data),
+        fallback_location=fallback_location,
+    )
     data.commentary = commentary_items
     data.commentary_markers = commentary_markers
     data.paragraphs = build_marked_page_paragraphs(data.content_rows, commentary_markers, data.format_map)
+
+
+def annotation_note_rows(data):
+    rows = (
+        [('commentary', row) for row in data.commentary_rows]
+        + [('reference', row) for row in data.references]
+        + [('source', row) for row in data.sources]
+    )
+    location_order, fallback_location = page_location_order(data.content_rows)
+    return sorted(
+        rows,
+        key=lambda item: annotation_text_sort_key(item, location_order, fallback_location),
+    )
+
+
+def page_location_order(rows):
+    order = {}
+    fallback_location = (None, None)
+    for row in rows:
+        key = location_key(row.paragraph, row.verse)
+        if fallback_location == (None, None) and row.paragraph is not None:
+            fallback_location = key
+        if row.paragraph is not None and row.verse is not None and key not in order:
+            order[key] = len(order)
+    return order, fallback_location
+
+
+def annotation_text_sort_key(item, location_order, fallback_location):
+    kind, row = item
+    paragraph, verse = annotation_location(kind, row, fallback_location)
+    location_index = annotation_location_index(paragraph, verse, location_order)
+    return (location_index, paragraph or 0, verse or 0, *rank_sort_key(row))
+
+
+def annotation_location_index(paragraph, verse, location_order):
+    key = location_key(paragraph, verse)
+    if key in location_order:
+        return location_order[key]
+    paragraph_indexes = [
+        index
+        for (row_paragraph, _), index in location_order.items()
+        if row_paragraph == paragraph
+    ]
+    if paragraph_indexes:
+        return min(paragraph_indexes)
+    return -1
 
 
 def sort_ranked_items(rows):
@@ -215,17 +307,51 @@ def sort_commentary_by_text_order(rows, commentary):
 
 
 def build_commentary_markers(commentary):
+    return build_annotation_markers([('commentary', row) for row in commentary])
+
+
+def build_annotation_markers(annotation_rows, fallback_location=None):
     markers = {}
     items = []
-    for index, row in enumerate(commentary, start=1):
+    fallback_location = fallback_location or first_annotation_location(annotation_rows)
+    for index, (kind, row) in enumerate(annotation_rows, start=1):
+        paragraph, verse = annotation_location(kind, row, fallback_location)
         marker = {
             'number': index,
-            'line_text': normalize_match_text(row.commentary_text),
+            'line_text': normalize_match_text(annotation_note_text(kind, row)),
         }
-        markers.setdefault(location_key(row.paragraph, row.verse), []).append(marker)
-        markers.setdefault(paragraph_key(row.paragraph), []).append((row.verse, marker))
-        items.append((index, row))
+        markers.setdefault(location_key(paragraph, verse), []).append(marker)
+        markers.setdefault(paragraph_key(paragraph), []).append((verse, marker))
+        items.append((index, kind, row))
     return items, markers
+
+
+def first_annotation_location(annotation_rows):
+    for kind, row in annotation_rows:
+        paragraph, verse = annotation_location(kind, row)
+        if paragraph is not None:
+            return paragraph, verse
+    return (None, None)
+
+
+def annotation_location(kind, row, fallback_location=None):
+    if kind == 'reference':
+        paragraph, verse = row.source_paragraph, row.source_verse
+    else:
+        paragraph, verse = row.paragraph, row.verse
+    if paragraph is None and fallback_location:
+        return fallback_location
+    if verse is None and fallback_location and paragraph == fallback_location[0]:
+        return fallback_location
+    return paragraph, verse
+
+
+def annotation_note_text(kind, row):
+    if kind == 'commentary':
+        return row.commentary_text or ''
+    if kind == 'reference':
+        return format_reference(row)
+    return format_source(row)
 
 
 def build_marked_page_paragraphs(rows, commentary_markers, format_map=None):
@@ -279,6 +405,8 @@ def build_line_segment(rows, commentary_markers, used_marker_keys, format_map):
             'verse': row.verse,
             'is_bold': bool(format_map.get(key) and format_map[key].is_bold),
             'is_italic': bool(format_map.get(key) and format_map[key].is_italic),
+            'content_role': format_map[key].content_role if format_map.get(key) else 'body',
+            'alignment_override': format_map[key].alignment_override if format_map.get(key) else '',
         })
     return {
         'fragments': fragments,
@@ -328,6 +456,9 @@ def normalize_match_text(text):
 
 
 def render_page_export(pdf, data, layout):
+    if getattr(data.page_format, 'centered_export', False):
+        render_centered_text_page(pdf, data, layout)
+        return
     width, height = layout.page_size
     y = height - layout.top_margin
     y = draw_export_header(pdf, data, layout, y)
@@ -336,6 +467,27 @@ def render_page_export(pdf, data, layout):
     y -= layout.section_gap
     y = draw_annotation_sections(pdf, data, layout, y)
     draw_footer(pdf, data, layout)
+
+
+def render_blank_export_page(pdf, layout):
+    return
+
+
+def render_centered_text_page(pdf, data, layout):
+    width, height = layout.page_size
+    horizontal_margin = max(layout.inside_margin, layout.outside_margin)
+    text_width = width - (horizontal_margin * 2)
+    text_style = TextStyle(font=layout.book_font, bold_font=bold_font_for(layout.book_font),
+                           size=layout.book_font_size, leading=layout.book_font_size * layout.book_line_spacing,
+                           char_spacing=layout.book_kerning,
+                           color=grayscale_color(layout.book_gray),
+                           role_styles=layout.content_role_styles)
+    text_height = measure_paragraph_block(data.paragraphs, text_width, text_style,
+                                          text_layout=layout.text_layout)
+    y = (height + text_height) / 2
+    draw_paragraph_block(pdf, data.paragraphs, horizontal_margin, y, text_width, text_style,
+                         text_layout=layout.text_layout, alignment='center',
+                         force_alignment='center')
 
 
 def prepare_page_export_data(data, layout, y):
@@ -348,7 +500,7 @@ def prepare_page_export_data(data, layout, y):
 
 def measure_book_block_height(data, layout):
     width, _ = layout.page_size
-    text_on_left = is_inside_text_left(data.page)
+    text_on_left = is_inside_text_left(data)
     left_margin, right_margin = page_margins(layout, text_on_left)
     content_width = width - left_margin - right_margin
     text_width = content_width if layout.one_column_top else (content_width - layout.column_gutter) * layout.text_ratio
@@ -356,7 +508,8 @@ def measure_book_block_height(data, layout):
     text_style = TextStyle(font=layout.book_font, bold_font=bold_font_for(layout.book_font),
                            size=layout.book_font_size, leading=layout.book_font_size * layout.book_line_spacing,
                            char_spacing=layout.book_kerning,
-                           color=grayscale_color(layout.book_gray))
+                           color=grayscale_color(layout.book_gray),
+                           role_styles=layout.content_role_styles)
     side_style = TextStyle(font=layout.definition_font, bold_font=bold_font_for(layout.definition_font),
                            size=layout.definition_font_size,
                            leading=layout.definition_font_size * layout.definition_line_spacing,
@@ -377,7 +530,7 @@ def measure_book_block_height(data, layout):
 
 def prune_side_definitions(data, layout, y):
     width, _ = layout.page_size
-    left_margin, right_margin = page_margins(layout, is_inside_text_left(data.page))
+    left_margin, right_margin = page_margins(layout, is_inside_text_left(data))
     content_width = width - left_margin - right_margin
     text_width = (content_width - layout.column_gutter) * layout.text_ratio
     side_width = content_width - layout.column_gutter - text_width
@@ -455,28 +608,17 @@ def measure_annotation_sections_height(sample, layout, y):
     commentary_items = []
     if layout.one_column_top:
         commentary_items.extend(format_definition_commentary_items(sort_definitions_alpha(definitions)))
-    commentary_items.extend(format_commentary(build_commentary_markers(sort_ranked_items(commentary_rows))[0]))
+    note_rows = (
+        [('commentary', row) for row in commentary_rows]
+        + [('reference', row) for row in references]
+        + [('source', row) for row in sources]
+    )
+    commentary_items.extend(format_commentary(build_annotation_markers(sorted(note_rows, key=lambda item: rank_sort_key(item[1])))[0]))
     if commentary_items:
         column_height, fits = measure_commentary_columns_height(commentary_items, layout, y)
         if not fits:
             return y - layout.bottom_margin + 1
         height += column_height
-    remaining_y = y - height
-    for items in (format_references(sort_ranked_items(references)),
-                  format_sources(sort_ranked_items(sources))):
-        if not items:
-            continue
-        section_height = measure_section_heading_height(layout)
-        style = annotation_text_style(layout)
-        for item in items:
-            section_height += measure_text_height(item, annotation_bounds(layout, None)[2],
-                                                  style.font, style.size, style.leading,
-                                                  style.char_spacing)
-            section_height += 0.08 * inch
-        height += section_height
-        remaining_y -= section_height
-        if remaining_y < layout.bottom_margin:
-            return y - layout.bottom_margin + 1
     return height
 
 
@@ -494,11 +636,27 @@ def measure_commentary_columns_height(items, layout, y):
                             size=max(5.5, layout.commentary_font_size - 0.8), leading=8,
                             char_spacing=layout.commentary_kerning,
                             color=grayscale_color(layout.commentary_gray))
+    column_items, wide_items = split_wide_annotation_items(items, column_width, style)
     top_offset = measure_section_heading_height(layout)
-    available = max(0, y - layout.bottom_margin - top_offset)
+    wide_height = measure_wide_annotation_items_height(wide_items, width, style, label_style)
+    bottom_limit = annotation_column_bottom_limit(layout, wide_height)
+    column_available = max(0, y - bottom_limit - top_offset)
+    if column_available < 0:
+        return y - layout.bottom_margin + 1, False
+    column_height, fits = measure_column_annotation_items_height(
+        column_items, column_width, column_count, column_available, style, label_style,
+    )
+    if not fits:
+        return y - layout.bottom_margin + 1, False
+    used_to_columns = top_offset + column_height
+    used_to_footer = max(0, y - footer_url_block_bottom_y(layout)) if wide_items else 0
+    return max(used_to_columns, used_to_footer), True
+
+
+def measure_column_annotation_items_height(items, column_width, column_count, available, style, label_style):
     column_index = 0
     current_height = 0
-    used_height = top_offset
+    used_height = 0
     for item in items:
         item_height = measure_commentary_item_height(item, column_width, style, label_style)
         item_height += 0.12 * inch
@@ -506,10 +664,57 @@ def measure_commentary_columns_height(items, layout, y):
             column_index += 1
             current_height = 0
         if column_index >= column_count or item_height > available:
-            return y - layout.bottom_margin + 1, False
+            return available + 1, False
         current_height += item_height
-        used_height = max(used_height, top_offset + current_height)
+        used_height = max(used_height, current_height)
     return used_height, True
+
+
+def split_wide_annotation_items(items, column_width, style):
+    column_items = []
+    wide_items = []
+    for item in items:
+        if source_url_for_item(item):
+            column_items.append(source_column_item(item))
+            wide_items.append(source_url_item(item))
+            continue
+        column_items.append(item)
+    return column_items, wide_items
+
+
+def source_url_for_item(item):
+    row = item.get('row')
+    return getattr(row, 'url', None) if item.get('kind') == 'source' else None
+
+
+def source_column_item(item):
+    clone = dict(item)
+    clone['text'] = format_source(item['row'], include_url=False)
+    return clone
+
+
+def source_url_item(item):
+    return {
+        'kind': 'source-url',
+        'marker': item.get('marker'),
+        'text': source_url_for_item(item),
+        'row': item.get('row'),
+    }
+
+
+def measure_wide_annotation_items_height(items, width, style, label_style):
+    height = 0
+    for item in items:
+        height += measure_wide_annotation_item_height(item, width, style, label_style)
+        height += 0.08 * inch
+    return height
+
+
+def measure_wide_annotation_item_height(item, width, style, label_style):
+    marker_width = measure_marker_width(item.get('marker'), style)
+    first_line_width = width - marker_width if item.get('marker') else width
+    return len(wrap_text(item.get('text') or '', first_line_width, style.font,
+                         style.size, style.char_spacing)) * style.leading
 
 
 def measure_commentary_item_height(item, width, style, label_style):
@@ -563,19 +768,29 @@ def draw_text(pdf, x, y, text, font, size, color, char_spacing=0):
 
 
 def draw_export_header(pdf, data, layout, y):
+    if page_has_body_chapter_title(data):
+        return y
     width, _ = layout.page_size
     text = data.chapter or data.book.title
-    text_width = measure_string(text, layout.chapter_font, layout.chapter_font_size, layout.chapter_kerning)
+    font = font_variant_for(layout.chapter_font, layout.chapter_bold, layout.chapter_italic)
+    text_width = measure_string(text, font, layout.chapter_font_size, layout.chapter_kerning)
     draw_text(
-        pdf, (width - text_width) / 2, y, text, layout.chapter_font,
+        pdf, (width - text_width) / 2, y, text, font,
         layout.chapter_font_size, grayscale_color(layout.chapter_gray), layout.chapter_kerning,
     )
     return y - layout.header_gap
 
 
+def page_has_body_chapter_title(data):
+    return any(
+        (fmt.content_role or 'body') in ('title', 'chapter')
+        for fmt in data.format_map.values()
+    )
+
+
 def draw_book_and_definitions(pdf, data, layout, y):
     width, _ = layout.page_size
-    text_on_left = is_inside_text_left(data.page)
+    text_on_left = is_inside_text_left(data)
     left_margin, right_margin = page_margins(layout, text_on_left)
     content_width = width - left_margin - right_margin
     text_width = content_width if layout.one_column_top else (content_width - layout.column_gutter) * layout.text_ratio
@@ -594,7 +809,8 @@ def draw_book_and_definitions(pdf, data, layout, y):
     text_style = TextStyle(font=layout.book_font, bold_font=bold_font_for(layout.book_font),
                            size=layout.book_font_size, leading=layout.book_font_size * layout.book_line_spacing,
                            char_spacing=layout.book_kerning,
-                           color=grayscale_color(layout.book_gray))
+                           color=grayscale_color(layout.book_gray),
+                           role_styles=layout.content_role_styles)
     side_style = TextStyle(font=layout.definition_font, bold_font=bold_font_for(layout.definition_font),
                            size=layout.definition_font_size,
                            leading=layout.definition_font_size * layout.definition_line_spacing,
@@ -621,31 +837,7 @@ def draw_book_and_definitions(pdf, data, layout, y):
 
 
 def draw_annotation_sections(pdf, data, layout, y):
-    y = draw_commentary_columns(pdf, data, layout, y)
-    sections = [
-        ('Book references', format_references(sort_ranked_items(data.references))),
-        ('Other references', format_sources(sort_ranked_items(data.sources))),
-    ]
-    for heading, items in sections:
-        if not items:
-            continue
-        y = ensure_space(pdf, layout, y, 0.7 * inch)
-        y = draw_section_heading(pdf, heading, layout, y, data=data)
-        left, right, width = annotation_bounds(layout, data)
-        annotation_style = TextStyle(font=layout.annotation_font,
-                                     bold_font=bold_font_for(layout.annotation_font),
-                                     size=layout.annotation_font_size,
-                                     leading=layout.annotation_font_size * layout.annotation_line_spacing,
-                                     char_spacing=layout.annotation_kerning,
-                                     color=grayscale_color(layout.annotation_gray))
-        for item in items:
-            estimated_height = measure_text_height(item, width, annotation_style.font,
-                                                   annotation_style.size, annotation_style.leading,
-                                                   annotation_style.char_spacing)
-            y = ensure_space(pdf, layout, y, estimated_height + 0.2 * inch)
-            y = draw_wrapped_text(pdf, item, left, y, width, annotation_style)
-            y -= 0.08 * inch
-    return y
+    return draw_commentary_columns(pdf, data, layout, y)
 
 
 def draw_commentary_columns(pdf, data, layout, y):
@@ -673,10 +865,18 @@ def draw_commentary_columns(pdf, data, layout, y):
                              size=max(5.5, layout.commentary_font_size - 0.8), leading=8,
                              char_spacing=layout.commentary_kerning,
                              color=grayscale_color(layout.commentary_gray))
+    column_items, wide_items = split_wide_annotation_items(items, column_width, style)
+    wide_height = measure_wide_annotation_items_height(wide_items, width, style, marker_style)
+    data.annotation_column_bottom_y = annotation_column_bottom_limit(layout, wide_height)
+    column_height, _ = measure_column_annotation_items_height(
+        column_items, column_width, column_count,
+        max(0, y - data.annotation_column_bottom_y),
+        style, marker_style,
+    )
     columns = [{'x': left + ((column_width + gap) * i)} for i in range(column_count)]
     column_index = 0
 
-    for item in items:
+    for item in column_items:
         if item['kind'] == 'definition':
             y, column_index, columns = draw_definition_flow_item(
                 pdf, item['label'], item['text'], columns, column_index, y, column_width,
@@ -686,10 +886,60 @@ def draw_commentary_columns(pdf, data, layout, y):
             y, column_index, columns = draw_marker_flow_item(
                 pdf, item['marker'], item['text'], columns, column_index, y, column_width,
                 style, marker_style, layout, data,
+                layout.commentary_alignment if item['kind'] == 'commentary' else layout.annotation_alignment,
             )
         y -= 0.12 * inch
         if y < layout.bottom_margin:
             y, column_index, columns = advance_annotation_column(pdf, layout, data, columns, column_index)
+    if wide_items:
+        y = min(y, draw_wide_annotation_items_at_footer(pdf, wide_items, left, width, style, marker_style, layout))
+    if hasattr(data, 'annotation_column_bottom_y'):
+        delattr(data, 'annotation_column_bottom_y')
+    return y
+
+
+def annotation_column_bottom_limit(layout, wide_height):
+    if wide_height <= 0:
+        return layout.bottom_margin
+    return footer_url_block_bottom_y(layout) + wide_height + 0.06 * inch
+
+
+def footer_url_block_bottom_y(layout):
+    page_number_leading = layout.page_number_font_size * layout.page_number_line_spacing
+    return layout.page_number_gap + page_number_leading + 0.08 * inch
+
+
+def draw_wide_annotation_items_at_footer(pdf, items, x, width, style, marker_style, layout):
+    height = measure_wide_annotation_items_height(items, width, style, marker_style)
+    y = footer_url_block_bottom_y(layout) + height
+    return draw_wide_annotation_items(pdf, items, x, y, width, style, marker_style, layout)
+
+
+def draw_wide_annotation_items(pdf, items, x, y, width, style, marker_style, layout):
+    for item in items:
+        if y - style.leading < footer_url_block_bottom_y(layout):
+            return y
+        y = draw_wide_marker_item(
+            pdf, item.get('marker'), item.get('text') or '', x, y, width,
+            style, marker_style,
+        )
+        y -= 0.08 * inch
+    return y
+
+
+def draw_wide_marker_item(pdf, marker, text, x, y, width, style, marker_style):
+    marker_width = measure_marker_width(marker, style)
+    first_line_width = width - marker_width if marker else width
+    lines = wrap_text(text, first_line_width, style.font, style.size, style.char_spacing)
+    for index, line in enumerate(lines):
+        line_x = x
+        line_width = width
+        if index == 0 and marker:
+            draw_superscript(pdf, marker, x, y, marker_style)
+            line_x += marker_width
+            line_width = first_line_width
+        draw_aligned_plain_line(pdf, line, line_x, y, line_width, style, 'left')
+        y -= style.leading
     return y
 
 
@@ -697,16 +947,18 @@ def advance_annotation_column(pdf, layout, data, columns, column_index):
     column_index += 1
     if column_index < len(columns):
         return getattr(data, 'annotation_top_y', layout.page_size[1] - layout.top_margin), column_index, columns
-    return layout.bottom_margin, len(columns) - 1, columns
+    return getattr(data, 'annotation_column_bottom_y', layout.bottom_margin), len(columns) - 1, columns
 
 
 def ensure_annotation_line_space(pdf, layout, data, columns, column_index, y):
-    if y - layout.commentary_font_size >= layout.bottom_margin:
+    bottom_limit = getattr(data, 'annotation_column_bottom_y', layout.bottom_margin)
+    if y - layout.commentary_font_size >= bottom_limit:
         return y, column_index, columns
     return advance_annotation_column(pdf, layout, data, columns, column_index)
 
 
-def draw_marker_flow_item(pdf, marker, text, columns, column_index, y, width, style, marker_style, layout, data):
+def draw_marker_flow_item(pdf, marker, text, columns, column_index, y, width, style, marker_style, layout, data,
+                          alignment='left'):
     marker_width = measure_marker_width(marker, style)
     first_line_width = width - marker_width if marker else width
     lines = wrap_text(text, first_line_width, style.font, style.size, style.char_spacing)
@@ -723,7 +975,7 @@ def draw_marker_flow_item(pdf, marker, text, columns, column_index, y, width, st
             marker_pending = False
         draw_aligned_plain_line(
             pdf, line, line_x, y, line_width, style,
-            alignment_for_line(layout.commentary_alignment, is_last=index == len(lines) - 1),
+            alignment_for_line(alignment, is_last=index == len(lines) - 1),
         )
         y -= style.leading
     return y, column_index, columns
@@ -798,41 +1050,43 @@ def format_definition_commentary_items(lookups):
 
 
 def format_commentary(rows):
-    return [{'kind': 'commentary', 'marker': marker, 'text': row.commentary_text or ''} for marker, row in rows]
+    return [{'kind': kind, 'marker': marker, 'text': annotation_note_text(kind, row), 'row': row} for marker, kind, row in rows]
 
 
 def format_references(rows):
-    items = []
-    for row in rows:
-        target = row.target_book.title if row.target_book else 'Book'
-        loc = make_location(row.target_chapter, row.target_page, row.target_paragraph, row.target_verse)
-        text = f'{target}'
-        if loc:
-            text = f'{text} ({loc})'
-        if row.quoted_text:
-            text = f'{text}: "{row.quoted_text}"'
-        if row.comments:
-            text = f'{text} - {row.comments}'
-        items.append(text)
-    return items
+    return [format_reference(row) for row in rows]
+
+
+def format_reference(row):
+    target = row.target_book.title if row.target_book else 'Book'
+    loc = make_location(row.target_chapter, row.target_page, row.target_paragraph, row.target_verse)
+    text = f'{target}'
+    if loc:
+        text = f'{text} ({loc})'
+    if row.quoted_text:
+        text = f'{text}: "{row.quoted_text}"'
+    if row.comments:
+        text = f'{text} - {row.comments}'
+    return text
 
 
 def format_sources(rows):
-    items = []
-    for row in rows:
-        bits = [row.name or 'Source']
-        if row.source_type:
-            bits.append(row.source_type)
-        if row.author:
-            bits.append(f'by {row.author}')
-        if row.publication:
-            bits.append(row.publication)
-        if row.url:
-            bits.append(row.url)
-        if row.notes:
-            bits.append(row.notes)
-        items.append(' - '.join(bits))
-    return items
+    return [format_source(row) for row in rows]
+
+
+def format_source(row, include_url=True):
+    bits = [row.name or 'Source']
+    if row.source_type:
+        bits.append(row.source_type)
+    if row.author:
+        bits.append(f'by {row.author}')
+    if row.publication:
+        bits.append(row.publication)
+    if include_url and row.url:
+        bits.append(row.url)
+    if row.notes:
+        bits.append(row.notes)
+    return ' - '.join(bits)
 
 
 def make_location(chapter, page, paragraph, verse):
@@ -848,10 +1102,14 @@ def make_location(chapter, page, paragraph, verse):
     return ', '.join(parts)
 
 
-def is_inside_text_left(page):
+def is_inside_text_left(data_or_page):
+    relative = getattr(data_or_page, 'relative_page_number', None)
+    if relative is not None:
+        return int(relative) % 2 == 1
+    page = getattr(data_or_page, 'page', data_or_page)
     try:
         return int(str(page)) % 2 == 1
-    except ValueError:
+    except (TypeError, ValueError):
         return True
 
 
@@ -865,17 +1123,18 @@ def annotation_bounds(layout, data):
     if not data:
         left = right = layout.annotation_margin
     else:
-        left, right = page_margins(layout, is_inside_text_left(data.page))
+        left, right = page_margins(layout, is_inside_text_left(data))
     return left, right, layout.page_size[0] - left - right
 
 
 def draw_footer(pdf, data, layout):
     width, _ = layout.page_size
-    text_width = measure_string(data.page, layout.page_number_font, layout.page_number_font_size,
+    font = font_variant_for(layout.page_number_font, layout.page_number_bold, layout.page_number_italic)
+    text_width = measure_string(data.page, font, layout.page_number_font_size,
                                 layout.page_number_kerning)
     draw_text(
         pdf, (width - text_width) / 2, layout.page_number_gap, data.page,
-        layout.page_number_font, layout.page_number_font_size,
+        font, layout.page_number_font_size,
         grayscale_color(layout.page_number_gray), layout.page_number_kerning,
     )
 
@@ -923,7 +1182,38 @@ def font_variant_for(font, is_bold=False, is_italic=False):
 
 
 def token_font_for(token, style):
-    return font_variant_for(style.font, token.get('is_bold'), token.get('is_italic'))
+    role = token.get('content_role') or 'body'
+    role_style = style.role_styles.get(role, {})
+    is_bold = token.get('is_bold') or bool(role_style.get('bold'))
+    is_italic = token.get('is_italic') or bool(role_style.get('italic'))
+    return font_variant_for(role_style.get('font') or style.font, is_bold, is_italic)
+
+
+def token_size_for(token, style):
+    role = token.get('content_role') or 'body'
+    role_style = style.role_styles.get(role, {})
+    return float(role_style.get('size') or style.size)
+
+
+def token_char_spacing_for(token, style):
+    role = token.get('content_role') or 'body'
+    role_style = style.role_styles.get(role, {})
+    return float(role_style.get('kerning') if role_style.get('kerning') is not None else style.char_spacing)
+
+
+def token_color_for(token, style):
+    role = token.get('content_role') or 'body'
+    role_style = style.role_styles.get(role, {})
+    if role_style.get('gray') is not None:
+        return grayscale_color(role_style.get('gray'))
+    return style.color
+
+
+def token_leading_for(token, style):
+    size = token_size_for(token, style)
+    role = token.get('content_role') or 'body'
+    role_style = style.role_styles.get(role, {})
+    return size * float(role_style.get('line_spacing') or (style.leading / style.size))
 
 
 def alignment_for_line(alignment, is_last=False):
@@ -931,12 +1221,16 @@ def alignment_for_line(alignment, is_last=False):
         return 'justify'
     if alignment == 'center':
         return 'center'
+    if alignment == 'right':
+        return 'right'
     return 'left'
 
 
 def aligned_x(x, width, text_width, alignment):
     if alignment == 'center':
         return x + max(0, width - text_width) / 2
+    if alignment == 'right':
+        return x + max(0, width - text_width)
     return x
 
 
@@ -952,9 +1246,18 @@ def measure_paragraph_block(paragraphs, width, style, text_layout='reflow_justif
     height = 0
     for paragraph in paragraphs:
         if text_layout == 'preserve_lines':
-            height += len(paragraph) * style.leading
+            height += sum(segment_leading(segment, style) for segment in paragraph)
+        elif paragraph_has_role(paragraph, 'poetry'):
+            for segment in paragraph:
+                if segment_has_role(segment, 'poetry'):
+                    height += segment_leading(segment, style)
+                else:
+                    height += sum(
+                        line_leading(line, style)
+                        for line in wrap_word_tokens(paragraph_tokens([segment]), width, style)
+                    )
         else:
-            height += len(wrap_word_tokens(paragraph_tokens(paragraph), width, style)) * style.leading
+            height += sum(line_leading(line, style) for line in wrap_word_tokens(paragraph_tokens(paragraph), width, style))
         height += style.leading * 0.35
     return height
 
@@ -975,32 +1278,71 @@ def measure_text_height(text, width, font, size, leading, char_spacing=0):
     return len(wrap_text(text, width, font, size, char_spacing)) * leading
 
 
-def draw_paragraph_block(pdf, paragraphs, x, y, width, style, text_layout='reflow_justified', alignment='justify'):
+def draw_paragraph_block(pdf, paragraphs, x, y, width, style, text_layout='reflow_justified', alignment='justify',
+                         force_alignment=None):
     if not paragraphs:
         return draw_wrapped_text(pdf, 'No book text stored for this page.', x, y, width, style)
     preserve_lines = text_layout == 'preserve_lines'
     for paragraph in paragraphs:
+        if not preserve_lines and paragraph_has_role(paragraph, 'poetry'):
+            y = draw_poetry_aware_paragraph(pdf, paragraph, x, y, width, style, alignment=alignment,
+                                            force_alignment=force_alignment)
+            y -= style.leading * 0.35
+            continue
         if not preserve_lines:
-            y = draw_justified_paragraph(pdf, paragraph, x, y, width, style, alignment=alignment)
+            y = draw_justified_paragraph(pdf, paragraph, x, y, width, style, alignment=alignment,
+                                         force_alignment=force_alignment)
             y -= style.leading * 0.35
             continue
         for index, segment in enumerate(paragraph):
             y = draw_original_text_line(
                 pdf, segment, x, y, width, style,
-                justify=True,
+                justify=True, force_alignment=force_alignment,
             )
         y -= style.leading * 0.35
     return y
 
 
-def draw_justified_paragraph(pdf, paragraph, x, y, width, style, alignment='justify'):
+def draw_poetry_aware_paragraph(pdf, paragraph, x, y, width, style, alignment='justify', force_alignment=None):
+    for segment in paragraph:
+        if segment_has_role(segment, 'poetry'):
+            y = draw_original_text_line(pdf, segment, x, y, width, style, justify=False,
+                                        force_alignment=force_alignment)
+        else:
+            y = draw_justified_paragraph(pdf, [segment], x, y, width, style, alignment=alignment,
+                                         force_alignment=force_alignment)
+    return y
+
+
+def draw_justified_paragraph(pdf, paragraph, x, y, width, style, alignment='justify', force_alignment=None):
     tokens = paragraph_tokens(paragraph)
     lines = wrap_word_tokens(tokens, width, style)
     for index, line in enumerate(lines):
-        line_alignment = alignment_for_line(alignment, is_last=index == len(lines) - 1)
+        line_alignment = force_alignment or role_alignment_for_line(line, style) or alignment_for_line(alignment, is_last=index == len(lines) - 1)
         draw_token_line(pdf, line, x, y, width, style, alignment=line_alignment)
-        y -= style.leading
+        y -= line_leading(line, style)
     return y
+
+
+def role_alignment_for_line(tokens, style):
+    overrides = {
+        token.get('alignment_override')
+        for token in tokens
+        if token.get('type') != 'space' and token.get('alignment_override')
+    }
+    if len(overrides) == 1:
+        return alignment_for_line(next(iter(overrides)))
+    if len(overrides) > 1:
+        return None
+    roles = {token.get('content_role') for token in tokens if token.get('type') != 'space'}
+    if len(roles) != 1:
+        return None
+    role = next(iter(roles)) or 'body'
+    role_style = style.role_styles.get(role, {})
+    alignment = role_style.get('alignment')
+    if alignment in ('left', 'center', 'right', 'justify'):
+        return alignment_for_line(alignment)
+    return None
 
 
 def paragraph_tokens(paragraph, preserve_hyphen=False):
@@ -1025,6 +1367,8 @@ def paragraph_tokens(paragraph, preserve_hyphen=False):
                     'markers': markers if word_index == 0 else [],
                     'is_bold': bool(fragment.get('is_bold')),
                     'is_italic': bool(fragment.get('is_italic')),
+                    'content_role': fragment.get('content_role') or 'body',
+                    'alignment_override': fragment.get('alignment_override') or '',
                 })
                 if word_index < len(words) - 1:
                     tokens.append({'type': 'space'})
@@ -1075,8 +1419,30 @@ def draw_token_line(pdf, tokens, x, y, width, style, alignment='left'):
             draw_inline_marker(pdf, marker, cursor_x, y, style)
             cursor_x += inline_marker_advance(marker, style)
         token_font = token_font_for(token, style)
-        draw_text(pdf, cursor_x, y, token.get('text', ''), token_font, style.size, style.color, style.char_spacing)
-        cursor_x += measure_string(token.get('text', ''), token_font, style.size, style.char_spacing)
+        token_size = token_size_for(token, style)
+        token_spacing = token_char_spacing_for(token, style)
+        draw_text(pdf, cursor_x, y, token.get('text', ''), token_font, token_size,
+                  token_color_for(token, style), token_spacing)
+        cursor_x += measure_string(token.get('text', ''), token_font, token_size, token_spacing)
+
+
+def line_leading(tokens, style):
+    word_tokens = [token for token in tokens if token.get('type') != 'space']
+    if not word_tokens:
+        return style.leading
+    return max(token_leading_for(token, style) for token in word_tokens)
+
+
+def segment_leading(segment, style):
+    return line_leading(segment_tokens(segment), style)
+
+
+def paragraph_has_role(paragraph, role):
+    return any(segment_has_role(segment, role) for segment in paragraph)
+
+
+def segment_has_role(segment, role):
+    return any((fragment.get('content_role') or 'body') == role for fragment in segment.get('fragments', []))
 
 
 def token_width(token, style):
@@ -1087,15 +1453,23 @@ def token_width(token, style):
 
 def word_token_width(token, style):
     marker_width = sum(inline_marker_advance(marker, style) for marker in token.get('markers', []))
-    return marker_width + measure_string(token.get('text', ''), token_font_for(token, style), style.size,
-                                         style.char_spacing)
+    return marker_width + measure_string(token.get('text', ''), token_font_for(token, style),
+                                         token_size_for(token, style),
+                                         token_char_spacing_for(token, style))
 
 
-def draw_original_text_line(pdf, segment, x, y, width, style, justify=False):
+def draw_original_text_line(pdf, segment, x, y, width, style, justify=False, force_alignment=None):
+    tokens = segment_tokens(segment)
+    if force_alignment:
+        draw_token_line(pdf, tokens, x, y, width, style, alignment=force_alignment)
+        return y - segment_leading(segment, style)
+    line_alignment = segment_alignment(segment, style)
+    if line_alignment:
+        draw_token_line(pdf, tokens, x, y, width, style, alignment=line_alignment)
+        return y - segment_leading(segment, style)
     if justify:
-        tokens = segment_tokens(segment)
         if draw_justified_original_tokens(pdf, tokens, x, y, width, style):
-            return y - style.leading
+            return y - segment_leading(segment, style)
 
     cursor_x = x
     previous_text = ''
@@ -1110,15 +1484,30 @@ def draw_original_text_line(pdf, segment, x, y, width, style, justify=False):
         for marker in fragment.get('markers', []):
             draw_inline_marker(pdf, marker, cursor_x, y, style)
             cursor_x += inline_marker_advance(marker, style)
-        fragment_font = font_variant_for(style.font, fragment.get('is_bold'), fragment.get('is_italic'))
-        draw_text(pdf, cursor_x, y, text, fragment_font, style.size, style.color, style.char_spacing)
-        cursor_x += measure_string(text, fragment_font, style.size, style.char_spacing)
+        role = fragment.get('content_role') or 'body'
+        role_style = style.role_styles.get(role, {})
+        fragment_size = float(role_style.get('size') or style.size)
+        fragment_spacing = float(role_style.get('kerning') if role_style.get('kerning') is not None else style.char_spacing)
+        fragment_font = font_variant_for(
+            role_style.get('font') or style.font,
+            fragment.get('is_bold') or bool(role_style.get('bold')),
+            fragment.get('is_italic') or bool(role_style.get('italic')),
+        )
+        draw_text(pdf, cursor_x, y, text, fragment_font, fragment_size,
+                  grayscale_color(role_style.get('gray')) if role_style.get('gray') is not None else style.color,
+                  fragment_spacing)
+        cursor_x += measure_string(text, fragment_font, fragment_size, fragment_spacing)
         previous_text = text
-    return y - style.leading
+    return y - segment_leading(segment, style)
 
 
 def segment_tokens(segment):
     return paragraph_tokens([segment], preserve_hyphen=True)
+
+
+def segment_alignment(segment, style):
+    tokens = segment_tokens(segment)
+    return role_alignment_for_line(tokens, style)
 
 
 def segment_has_markers(segment):
@@ -1263,7 +1652,7 @@ def measure_marker_width(marker, style):
 
 def draw_labeled_items(pdf, items, x, y, width, body_style, label_style, empty_text='', alignment='left'):
     if not items:
-        return draw_wrapped_text(pdf, empty_text, x, y, width, body_style, alignment=alignment)
+        return y
     for label, body in items:
         draw_text(pdf, x, y, shorten(label, width=34, placeholder='...'), label_style.bold_font,
                   label_style.size, label_style.color, label_style.char_spacing)

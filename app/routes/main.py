@@ -1,11 +1,12 @@
 import os
 from flask import Blueprint, abort, current_app, render_template, request, redirect, send_file, send_from_directory, url_for
 from ..models import Setting, Book, BookContent, BookContentFormat, BookTableOfContents
+from ..page_numbers import page_label_for_relative, page_label_sort_key, populate_book_relative_page_numbers, relative_page_for_label
 from .. import db
 
 main_bp = Blueprint('main', __name__)
 EXPORT_TEXT_LAYOUTS = {'reflow_justified'}
-EXPORT_ALIGNMENTS = {'left', 'justify', 'center'}
+EXPORT_ALIGNMENTS = {'left', 'justify', 'center', 'right'}
 EXPORT_FONT_OPTIONS = {'Times-Roman', 'Helvetica', 'Courier'}
 EXPORT_PAGE_SIZES = {'letter', 'half_letter'}
 EXPORT_PAGE_SIZE_PROFILE_PREFIXES = {
@@ -18,6 +19,43 @@ EXPORT_SETTING_DEFAULTS = {
     'export_book_alignment': 'justify',
     'export_definition_alignment': 'left',
     'export_commentary_alignment': 'left',
+    'export_annotation_alignment': 'left',
+    'export_title_alignment': 'center',
+    'export_subtitle_alignment': 'center',
+    'export_content_chapter_alignment': 'center',
+    'export_header_alignment': 'left',
+    'export_title_font_size': '14',
+    'export_subtitle_font_size': '12',
+    'export_content_chapter_font_size': '12',
+    'export_header_font_size': '10.5',
+    'export_title_bold': '1',
+    'export_title_italic': '0',
+    'export_subtitle_bold': '0',
+    'export_subtitle_italic': '1',
+    'export_content_chapter_bold': '1',
+    'export_content_chapter_italic': '0',
+    'export_header_bold': '1',
+    'export_header_italic': '0',
+    'export_title_line_spacing': '1.2',
+    'export_subtitle_line_spacing': '1.2',
+    'export_content_chapter_line_spacing': '1.2',
+    'export_header_line_spacing': '1.2',
+    'export_title_kerning': '0',
+    'export_subtitle_kerning': '0',
+    'export_content_chapter_kerning': '0',
+    'export_header_kerning': '0',
+    'export_title_font': 'Times-Roman',
+    'export_subtitle_font': 'Times-Roman',
+    'export_content_chapter_font': 'Helvetica',
+    'export_header_font': 'Helvetica',
+    'export_title_gray': '0',
+    'export_subtitle_gray': '15',
+    'export_content_chapter_gray': '0',
+    'export_header_gray': '20',
+    'export_chapter_bold': '0',
+    'export_chapter_italic': '0',
+    'export_page_number_bold': '0',
+    'export_page_number_italic': '0',
     'export_margin_top': '0.45',
     'export_margin_bottom': '0.45',
     'export_chapter_gap': '0.46',
@@ -131,7 +169,12 @@ def get_export_setting_values():
         if values['export_text_layout'] in EXPORT_TEXT_LAYOUTS
         else 'reflow_justified'
     )
-    for key in ('export_book_alignment', 'export_definition_alignment', 'export_commentary_alignment'):
+    for key in (
+        'export_book_alignment', 'export_definition_alignment', 'export_commentary_alignment',
+        'export_annotation_alignment',
+        'export_title_alignment', 'export_subtitle_alignment',
+        'export_content_chapter_alignment', 'export_header_alignment',
+    ):
         if values.get(key) not in EXPORT_ALIGNMENTS:
             values[key] = EXPORT_SETTING_DEFAULTS[key]
     return values
@@ -185,6 +228,49 @@ def build_export_layout():
         book_alignment=values['export_book_alignment'],
         definition_alignment=values['export_definition_alignment'],
         commentary_alignment=values['export_commentary_alignment'],
+        annotation_alignment=values['export_annotation_alignment'],
+        content_role_styles={
+            'title': {
+                'alignment': values['export_title_alignment'],
+                'font': _export_font_setting(values, 'export_title_font'),
+                'size': _export_float_setting(values, 'export_title_font_size', 5, 24),
+                'line_spacing': _export_float_setting(values, 'export_title_line_spacing', 0.8, 2.0),
+                'kerning': _export_float_setting(values, 'export_title_kerning', -1.0, 2.0),
+                'gray': _export_float_setting(values, 'export_title_gray', 0, 90),
+                'bold': _export_bool_setting(values, 'export_title_bold'),
+                'italic': _export_bool_setting(values, 'export_title_italic'),
+            },
+            'subtitle': {
+                'alignment': values['export_subtitle_alignment'],
+                'font': _export_font_setting(values, 'export_subtitle_font'),
+                'size': _export_float_setting(values, 'export_subtitle_font_size', 5, 24),
+                'line_spacing': _export_float_setting(values, 'export_subtitle_line_spacing', 0.8, 2.0),
+                'kerning': _export_float_setting(values, 'export_subtitle_kerning', -1.0, 2.0),
+                'gray': _export_float_setting(values, 'export_subtitle_gray', 0, 90),
+                'bold': _export_bool_setting(values, 'export_subtitle_bold'),
+                'italic': _export_bool_setting(values, 'export_subtitle_italic'),
+            },
+            'chapter': {
+                'alignment': values['export_content_chapter_alignment'],
+                'font': _export_font_setting(values, 'export_content_chapter_font'),
+                'size': _export_float_setting(values, 'export_content_chapter_font_size', 5, 24),
+                'line_spacing': _export_float_setting(values, 'export_content_chapter_line_spacing', 0.8, 2.0),
+                'kerning': _export_float_setting(values, 'export_content_chapter_kerning', -1.0, 2.0),
+                'gray': _export_float_setting(values, 'export_content_chapter_gray', 0, 90),
+                'bold': _export_bool_setting(values, 'export_content_chapter_bold'),
+                'italic': _export_bool_setting(values, 'export_content_chapter_italic'),
+            },
+            'header': {
+                'alignment': values['export_header_alignment'],
+                'font': _export_font_setting(values, 'export_header_font'),
+                'size': _export_float_setting(values, 'export_header_font_size', 5, 24),
+                'line_spacing': _export_float_setting(values, 'export_header_line_spacing', 0.8, 2.0),
+                'kerning': _export_float_setting(values, 'export_header_kerning', -1.0, 2.0),
+                'gray': _export_float_setting(values, 'export_header_gray', 0, 90),
+                'bold': _export_bool_setting(values, 'export_header_bold'),
+                'italic': _export_bool_setting(values, 'export_header_italic'),
+            },
+        },
         top_margin=_export_float_setting(values, 'export_margin_top', 0.1, 2.0) * inch,
         bottom_margin=_export_float_setting(values, 'export_margin_bottom', 0.1, 2.0) * inch,
         header_gap=_export_float_setting(values, 'export_chapter_gap', 0.1, 2.0) * inch,
@@ -219,6 +305,10 @@ def build_export_layout():
         annotation_kerning=_export_float_setting(values, 'export_annotation_kerning', -1.0, 2.0),
         chapter_font=_export_font_setting(values, 'export_chapter_font'),
         page_number_font=_export_font_setting(values, 'export_page_number_font'),
+        chapter_bold=_export_bool_setting(values, 'export_chapter_bold'),
+        chapter_italic=_export_bool_setting(values, 'export_chapter_italic'),
+        page_number_bold=_export_bool_setting(values, 'export_page_number_bold'),
+        page_number_italic=_export_bool_setting(values, 'export_page_number_italic'),
         book_font=_export_font_setting(values, 'export_book_font'),
         definition_font=_export_font_setting(values, 'export_definition_font'),
         commentary_font=_export_font_setting(values, 'export_commentary_font'),
@@ -250,26 +340,58 @@ def get_book_content_mode(book_id, default='sentence'):
 
 
 def get_facing_page(book_id, page):
-    try:
-        page_number = int(str(page))
-    except (TypeError, ValueError):
+    relative = relative_page_for_label(book_id, page)
+    if relative is None:
         return None
-    facing_page = page_number - 1 if page_number % 2 else page_number + 1
-    if facing_page < 1:
+    facing_relative = relative - 1 if relative % 2 else relative + 1
+    if facing_relative < 1:
         return None
-    facing_page = str(facing_page)
-    exists = BookContent.query.filter_by(book_id=book_id, page=facing_page).first()
-    return facing_page if exists else None
+    return page_label_for_relative(book_id, facing_relative)
 
 
 def get_preview_page_numbers(book, page):
     if not book:
         return []
+    relative = relative_page_for_label(book.id, page)
+    if relative is None:
+        populate_book_relative_page_numbers(book.id)
+        relative = relative_page_for_label(book.id, page)
     facing_page = get_facing_page(book.id, page)
-    pages = [str(page)]
-    if facing_page:
-        pages.append(facing_page)
-    pages.sort(key=_page_sort_key)
+    if relative and relative % 2:
+        return [facing_page, str(page)]
+    return [str(page), facing_page]
+
+
+def get_book_export_page_numbers(book):
+    if not book:
+        return []
+    missing_relative_count = (BookContent.query
+                              .filter_by(book_id=book.id)
+                              .filter(BookContent.page.isnot(None))
+                              .filter(BookContent.relative_page_number.is_(None))
+                              .count())
+    if missing_relative_count:
+        populate_book_relative_page_numbers(book.id)
+    page_rows = (db.session.query(BookContent.page, db.func.min(BookContent.relative_page_number))
+                 .filter_by(book_id=book.id)
+                 .filter(BookContent.page.isnot(None))
+                 .group_by(BookContent.page)
+                 .all())
+    pages_by_relative = {
+        relative: str(page)
+        for page, relative in page_rows
+        if relative is not None
+    }
+    if not pages_by_relative:
+        return []
+    first_relative = min(pages_by_relative)
+    last_relative = max(pages_by_relative)
+    pages = [
+        pages_by_relative.get(relative)
+        for relative in range(first_relative, last_relative + 1)
+    ]
+    if first_relative % 2:
+        pages.insert(0, None)
     return pages
 
 
@@ -278,7 +400,8 @@ def build_preview_pages(book, page):
     return [
         {
             'page': preview_page,
-            'url': url_for('main.export_page_pdf', book_id=book.id, page=preview_page),
+            'url': url_for('main.export_page_pdf', book_id=book.id, page=preview_page) if preview_page else '',
+            'blank': preview_page is None,
         }
         for preview_page in pages
     ]
@@ -310,12 +433,15 @@ def _build_reader_state(book, page, content_mode):
     if not book:
         return state
 
-    page_rows = (db.session.query(BookContent.page)
+    page_rows = (db.session.query(BookContent.page, db.func.min(BookContent.relative_page_number))
                  .filter_by(book_id=book.id)
-                 .distinct()
+                 .group_by(BookContent.page)
                  .all())
-    page_values = [row[0] for row in page_rows if row[0]]
-    page_values.sort(key=_page_sort_key)
+    page_values = [
+        row[0]
+        for row in sorted(page_rows, key=lambda row: (row[1] or 10**9, _page_sort_key(row[0])))
+        if row[0]
+    ]
     if page in page_values:
         index = page_values.index(page)
         if index > 0:
@@ -417,22 +543,63 @@ def index():
 
 
 def _page_sort_key(page):
-    page = str(page)
-    if page.startswith('front-'):
-        return (0, page)
-    roman_values = {'i': 1, 'v': 5, 'x': 10, 'l': 50, 'c': 100, 'd': 500, 'm': 1000}
-    if page.isdigit():
-        return (2, int(page))
-    total = 0
-    previous = 0
-    for char in reversed(page.lower()):
-        value = roman_values.get(char, 0)
-        if value < previous:
-            total -= value
-        else:
-            total += value
-            previous = value
-    return (1, total or page)
+    if page is None:
+        return (-1, 0)
+    return page_label_sort_key(page)
+
+
+def export_page_filename(book, page):
+    index = relative_page_number(book.id, page)
+    title = page_export_title(book.id, page) or book.title
+    return safe_export_filename(f'{index:04d}-{title}-page-{page}.pdf')
+
+
+def export_spread_filename(book, pages):
+    first_page = next((page for page in pages if page is not None), '')
+    index = relative_page_number(book.id, first_page)
+    titles = []
+    for page in pages:
+        title = page_export_title(book.id, page)
+        if title and title not in titles:
+            titles.append(title)
+    title = ' - '.join(titles) or book.title
+    page_label = '-'.join(str(page) if page is not None else 'blank' for page in pages)
+    return safe_export_filename(f'{index:04d}-{title}-pages-{page_label}.pdf')
+
+
+def export_book_filename(book):
+    return safe_export_filename(f'{book.title}-complete.pdf')
+
+
+def relative_page_number(book_id, page):
+    relative = relative_page_for_label(book_id, page)
+    if relative is None:
+        populate_book_relative_page_numbers(book_id)
+        relative = relative_page_for_label(book_id, page)
+    return relative or 0
+
+
+def page_export_title(book_id, page):
+    if page is None:
+        return ''
+    row = (
+        BookContent.query
+        .filter_by(book_id=book_id, page=str(page))
+        .filter((BookContent.chapter_name.isnot(None)) | (BookContent.chapter.isnot(None)))
+        .order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id)
+        .first()
+    )
+    if not row:
+        return ''
+    return row.chapter_name or row.chapter or ''
+
+
+def safe_export_filename(value):
+    cleaned = ''.join(char if char.isalnum() or char in (' ', '.', '-', '_') else '-' for char in str(value or 'export.pdf'))
+    cleaned = '-'.join(cleaned.split())
+    while '--' in cleaned:
+        cleaned = cleaned.replace('--', '-')
+    return cleaned.strip('-') or 'export.pdf'
 
 
 # ── Settings page ─────────────────────────────────────────────────────────────
@@ -547,7 +714,7 @@ def export_page_pdf(book_id, page):
     book = Book.query.get_or_404(book_id)
     layout = build_export_layout()
     pdf_buffer = build_page_pdf(book_id, page, layout=layout)
-    filename = f'{book.title}-page-{page}.pdf'.replace('/', '-')
+    filename = export_page_filename(book, page)
     response = send_file(pdf_buffer, mimetype='application/pdf',
                          as_attachment=False, download_name=filename)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -562,8 +729,24 @@ def export_page_spread_pdf(book_id, page):
     pages = get_preview_page_numbers(book, page) or [str(page)]
     layout = build_export_layout()
     pdf_buffer = build_pages_pdf(book_id, pages, layout=layout)
-    page_label = '-'.join(pages)
-    filename = f'{book.title}-pages-{page_label}.pdf'.replace('/', '-')
+    filename = export_spread_filename(book, pages)
+    response = send_file(pdf_buffer, mimetype='application/pdf',
+                         as_attachment=False, download_name=filename)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response
+
+
+@main_bp.route('/books/<int:book_id>/export-book.pdf')
+def export_book_pdf(book_id):
+    from ..services.page_pdf_exporter import export_pages_pdf as build_pages_pdf
+    book = Book.query.get_or_404(book_id)
+    pages = get_book_export_page_numbers(book)
+    if not pages:
+        abort(404)
+    layout = build_export_layout()
+    pdf_buffer = build_pages_pdf(book_id, pages, layout=layout)
+    filename = export_book_filename(book)
     response = send_file(pdf_buffer, mimetype='application/pdf',
                          as_attachment=False, download_name=filename)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
