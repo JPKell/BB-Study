@@ -171,6 +171,7 @@ class DictionaryLookup(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     dictionary_id = db.Column(db.Integer, db.ForeignKey('dictionary.id'), nullable=False)
     book_location_id = db.Column(db.Integer, db.ForeignKey('book_locations.id'), nullable=False)
+    rank = db.Column(db.Integer)
 
     def to_dict(self):
         location = self.location
@@ -178,6 +179,7 @@ class DictionaryLookup(db.Model):
             'id': self.id,
             'dictionary_id': self.dictionary_id,
             'book_location_id': self.book_location_id,
+            'rank': self.rank,
             'word_phrase': self.entry.word_phrase if self.entry else None,
             'meaning': self.entry.meaning if self.entry else None,
             'notes': self.entry.notes if self.entry else None,
@@ -209,6 +211,7 @@ class BookReference(db.Model):
     # Content
     quoted_text = db.Column(db.Text)
     comments = db.Column(db.Text)
+    rank = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     source_book = db.relationship('Book', foreign_keys=[source_book_id],
@@ -235,6 +238,7 @@ class BookReference(db.Model):
             'target_line': self.target_verse,
             'quoted_text': self.quoted_text,
             'comments': self.comments,
+            'rank': self.rank,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -338,6 +342,7 @@ class ContentTopic(db.Model):
     start_content_id = db.Column(db.Integer, db.ForeignKey('book_content.id'))
     end_content_id = db.Column(db.Integer, db.ForeignKey('book_content.id'))
     notes = db.Column(db.Text)
+    rank = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
@@ -380,6 +385,7 @@ class ContentTopic(db.Model):
             'end_verse': content_rows[-1].verse if content_rows else (content.verse if content else None),
             'content': combined,
             'notes': self.notes,
+            'rank': self.rank,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -424,6 +430,7 @@ class Commentary(db.Model):
     paragraph = db.Column(db.Integer)
     verse = db.Column(db.Integer)
     commentary_text = db.Column(db.Text, nullable=False)
+    rank = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -438,6 +445,7 @@ class Commentary(db.Model):
             'verse': self.verse,
             'line': self.verse,
             'commentary_text': self.commentary_text,
+            'rank': self.rank,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -459,6 +467,7 @@ class Source(db.Model):
     publication = db.Column(db.String(500))
     publish_date = db.Column(db.String(50))
     notes = db.Column(db.Text)
+    rank = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     book = db.relationship('Book', backref=db.backref('sources', lazy=True))
@@ -480,5 +489,6 @@ class Source(db.Model):
             'publication': self.publication,
             'publish_date': self.publish_date,
             'notes': self.notes,
+            'rank': self.rank,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

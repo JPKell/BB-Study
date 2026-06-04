@@ -11,7 +11,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 
 from ..models import (Book, BookContent, BookContentFormat, BookLocation, BookReference,
-                      Commentary, ContentTopic, DictionaryLookup, Source)
+                      Commentary, DictionaryLookup, Source)
 
 
 @dataclass
@@ -84,13 +84,15 @@ class PageExportData:
     book: Book
     page: str
     chapter: str
+    content_rows: list
+    format_map: dict
     paragraphs: list
     definitions: list
+    commentary_rows: list
     commentary: list
     commentary_markers: dict
     references: list
     sources: list
-    topics: list
 
 
 def export_page_pdf(book_id, page, layout=None):
@@ -132,7 +134,6 @@ def collect_page_export_data(book_id, page):
                   .order_by(Commentary.created_at)
                   .all())
     commentary = sort_commentary_by_text_order(rows, commentary)
-    commentary_items, commentary_markers = build_commentary_markers(commentary)
     references = (BookReference.query
                   .filter(BookReference.source_book_id == book_id,
                           BookReference.source_page == page)
@@ -150,11 +151,39 @@ def collect_page_export_data(book_id, page):
                        .filter(DictionaryLookup.book_location_id.in_(loc_ids))
                        .all())
 
-    topics = collect_page_topics(rows)
     format_map = collect_content_formats(book_id, page)
-    paragraphs = build_marked_page_paragraphs(rows, commentary_markers, format_map)
-    return PageExportData(book, str(page), chapter, paragraphs, definitions,
-                          commentary_items, commentary_markers, references, sources, topics)
+    data = PageExportData(book, str(page), chapter, rows, format_map, [], definitions,
+                          commentary, [], {}, references, sources)
+    refresh_commentary_export(data)
+    return data
+
+
+def refresh_commentary_export(data):
+    commentary_items, commentary_markers = build_commentary_markers(sort_ranked_items(data.commentary_rows))
+    data.commentary = commentary_items
+    data.commentary_markers = commentary_markers
+    data.paragraphs = build_marked_page_paragraphs(data.content_rows, commentary_markers, data.format_map)
+
+
+def sort_ranked_items(rows):
+    return sorted(rows, key=rank_sort_key)
+
+
+def sort_definitions_alpha(lookups):
+    return sorted(lookups, key=definition_alpha_key)
+
+
+def definition_alpha_key(lookup):
+    entry = getattr(lookup, 'entry', None)
+    word = (getattr(entry, 'word_phrase', '') or '').casefold()
+    return (word, getattr(lookup, 'id', 0) or 0)
+
+
+def rank_sort_key(row):
+    rank = getattr(row, 'rank', None)
+    rank_value = rank if rank is not None and rank > 0 else 1000000
+    created_at = getattr(row, 'created_at', None) or datetime.min
+    return (rank_value, created_at, getattr(row, 'id', 0) or 0)
 
 
 def collect_content_formats(book_id, page):
@@ -298,32 +327,223 @@ def normalize_match_text(text):
     return ' '.join((text or '').lower().split())
 
 
-def collect_page_topics(rows):
-    if not rows:
-        return []
-    page_low_id = min(row.id for row in rows)
-    page_high_id = max(row.id for row in rows)
-    topics = []
-    for link in ContentTopic.query.order_by(ContentTopic.created_at).all():
-        start_id = link.start_content_id or link.book_content_id
-        end_id = link.end_content_id or link.book_content_id
-        if not start_id or not end_id:
-            continue
-        low_id = min(start_id, end_id)
-        high_id = max(start_id, end_id)
-        if low_id <= page_high_id and high_id >= page_low_id:
-            topics.append(link)
-    return topics
-
-
 def render_page_export(pdf, data, layout):
     width, height = layout.page_size
     y = height - layout.top_margin
     y = draw_export_header(pdf, data, layout, y)
+    prepare_page_export_data(data, layout, y)
     y = draw_book_and_definitions(pdf, data, layout, y)
     y -= layout.section_gap
     y = draw_annotation_sections(pdf, data, layout, y)
     draw_footer(pdf, data, layout)
+
+
+def prepare_page_export_data(data, layout, y):
+    if not layout.one_column_top:
+        data.definitions = prune_side_definitions(data, layout, y)
+    after_book_y = y - measure_book_block_height(data, layout)
+    prune_bottom_annotations(data, layout, after_book_y - layout.section_gap)
+    refresh_commentary_export(data)
+
+
+def measure_book_block_height(data, layout):
+    width, _ = layout.page_size
+    text_on_left = is_inside_text_left(data.page)
+    left_margin, right_margin = page_margins(layout, text_on_left)
+    content_width = width - left_margin - right_margin
+    text_width = content_width if layout.one_column_top else (content_width - layout.column_gutter) * layout.text_ratio
+    side_width = 0 if layout.one_column_top else content_width - layout.column_gutter - text_width
+    text_style = TextStyle(font=layout.book_font, bold_font=bold_font_for(layout.book_font),
+                           size=layout.book_font_size, leading=layout.book_font_size * layout.book_line_spacing,
+                           char_spacing=layout.book_kerning,
+                           color=grayscale_color(layout.book_gray))
+    side_style = TextStyle(font=layout.definition_font, bold_font=bold_font_for(layout.definition_font),
+                           size=layout.definition_font_size,
+                           leading=layout.definition_font_size * layout.definition_line_spacing,
+                           char_spacing=layout.definition_kerning,
+                           color=grayscale_color(layout.definition_gray))
+    title_style = TextStyle(font=bold_font_for(layout.definition_font), bold_font=bold_font_for(layout.definition_font),
+                            size=layout.definition_font_size,
+                            leading=layout.definition_font_size * layout.definition_line_spacing,
+                            char_spacing=layout.definition_kerning,
+                            color=grayscale_color(layout.definition_gray))
+    text_height = measure_paragraph_block(data.paragraphs, text_width, text_style,
+                                          text_layout=layout.text_layout)
+    side_height = 0 if layout.one_column_top else measure_labeled_items(
+        format_definitions(sort_definitions_alpha(data.definitions)), side_width, side_style, title_style,
+    )
+    return max(layout.top_min_height, text_height, side_height)
+
+
+def prune_side_definitions(data, layout, y):
+    width, _ = layout.page_size
+    left_margin, right_margin = page_margins(layout, is_inside_text_left(data.page))
+    content_width = width - left_margin - right_margin
+    text_width = (content_width - layout.column_gutter) * layout.text_ratio
+    side_width = content_width - layout.column_gutter - text_width
+    style = TextStyle(font=layout.definition_font, bold_font=bold_font_for(layout.definition_font),
+                      size=layout.definition_font_size,
+                      leading=layout.definition_font_size * layout.definition_line_spacing,
+                      char_spacing=layout.definition_kerning,
+                      color=grayscale_color(layout.definition_gray))
+    title_style = TextStyle(font=bold_font_for(layout.definition_font), bold_font=bold_font_for(layout.definition_font),
+                            size=layout.definition_font_size,
+                            leading=layout.definition_font_size * layout.definition_line_spacing,
+                            char_spacing=layout.definition_kerning,
+                            color=grayscale_color(layout.definition_gray))
+    available = max(0, y - layout.bottom_margin)
+    kept = sort_ranked_items(data.definitions)
+    while kept and measure_labeled_items(format_definitions(sort_definitions_alpha(kept)), side_width, style, title_style) > available:
+        kept.pop()
+    return kept
+
+
+def prune_bottom_annotations(data, layout, y):
+    pool = annotation_prune_pool(data, layout)
+    if not pool:
+        return
+    kept = set(pool)
+    while kept and not annotation_pool_fits(data, layout, y, kept):
+        kept.remove(max(kept, key=annotation_candidate_drop_key))
+    data.commentary_rows = [row for row in data.commentary_rows if annotation_candidate('commentary', row) in kept]
+    data.references = [row for row in data.references if annotation_candidate('reference', row) in kept]
+    data.sources = [row for row in data.sources if annotation_candidate('source', row) in kept]
+    if layout.one_column_top:
+        data.definitions = [row for row in data.definitions if annotation_candidate('definition', row) in kept]
+
+
+def annotation_prune_pool(data, layout):
+    candidates = []
+    if layout.one_column_top:
+        candidates.extend(annotation_candidate('definition', row) for row in data.definitions)
+    candidates.extend(annotation_candidate('commentary', row) for row in data.commentary_rows)
+    candidates.extend(annotation_candidate('reference', row) for row in data.references)
+    candidates.extend(annotation_candidate('source', row) for row in data.sources)
+    return candidates
+
+
+def annotation_candidate(kind, row):
+    return (kind, getattr(row, 'id', id(row)), row)
+
+
+def annotation_candidate_drop_key(candidate):
+    _, _, row = candidate
+    rank = getattr(row, 'rank', None)
+    rank_value = rank if rank is not None and rank > 0 else 1000000
+    created_at = getattr(row, 'created_at', None) or datetime.min
+    return (rank_value, created_at, getattr(row, 'id', 0) or 0)
+
+
+def annotation_pool_fits(data, layout, y, kept):
+    sample = annotation_data_for_kept(data, layout, kept)
+    return measure_annotation_sections_height(sample, layout, y) <= max(0, y - layout.bottom_margin)
+
+
+def annotation_data_for_kept(data, layout, kept):
+    definitions = data.definitions
+    if layout.one_column_top:
+        definitions = [row for row in data.definitions if annotation_candidate('definition', row) in kept]
+    commentary_rows = [row for row in data.commentary_rows if annotation_candidate('commentary', row) in kept]
+    references = [row for row in data.references if annotation_candidate('reference', row) in kept]
+    sources = [row for row in data.sources if annotation_candidate('source', row) in kept]
+    return definitions, commentary_rows, references, sources
+
+
+def measure_annotation_sections_height(sample, layout, y):
+    definitions, commentary_rows, references, sources = sample
+    height = 0
+    commentary_items = []
+    if layout.one_column_top:
+        commentary_items.extend(format_definition_commentary_items(sort_definitions_alpha(definitions)))
+    commentary_items.extend(format_commentary(build_commentary_markers(sort_ranked_items(commentary_rows))[0]))
+    if commentary_items:
+        column_height, fits = measure_commentary_columns_height(commentary_items, layout, y)
+        if not fits:
+            return y - layout.bottom_margin + 1
+        height += column_height
+    remaining_y = y - height
+    for items in (format_references(sort_ranked_items(references)),
+                  format_sources(sort_ranked_items(sources))):
+        if not items:
+            continue
+        section_height = measure_section_heading_height(layout)
+        style = annotation_text_style(layout)
+        for item in items:
+            section_height += measure_text_height(item, annotation_bounds(layout, None)[2],
+                                                  style.font, style.size, style.leading,
+                                                  style.char_spacing)
+            section_height += 0.08 * inch
+        height += section_height
+        remaining_y -= section_height
+        if remaining_y < layout.bottom_margin:
+            return y - layout.bottom_margin + 1
+    return height
+
+
+def measure_commentary_columns_height(items, layout, y):
+    width = layout.page_size[0] - (2 * layout.annotation_margin)
+    column_count = max(1, min(4, int(layout.commentary_columns or 3)))
+    column_width = (width - (layout.commentary_column_gutter * (column_count - 1))) / column_count
+    style = TextStyle(font=layout.commentary_font, bold_font=bold_font_for(layout.commentary_font),
+                      size=layout.commentary_font_size,
+                      leading=layout.commentary_font_size * layout.commentary_line_spacing,
+                      char_spacing=layout.commentary_kerning,
+                      color=grayscale_color(layout.commentary_gray))
+    label_style = TextStyle(font=bold_font_for(layout.commentary_font),
+                            bold_font=bold_font_for(layout.commentary_font),
+                            size=max(5.5, layout.commentary_font_size - 0.8), leading=8,
+                            char_spacing=layout.commentary_kerning,
+                            color=grayscale_color(layout.commentary_gray))
+    top_offset = measure_section_heading_height(layout)
+    available = max(0, y - layout.bottom_margin - top_offset)
+    column_index = 0
+    current_height = 0
+    used_height = top_offset
+    for item in items:
+        item_height = measure_commentary_item_height(item, column_width, style, label_style)
+        item_height += 0.12 * inch
+        if current_height and current_height + item_height > available:
+            column_index += 1
+            current_height = 0
+        if column_index >= column_count or item_height > available:
+            return y - layout.bottom_margin + 1, False
+        current_height += item_height
+        used_height = max(used_height, top_offset + current_height)
+    return used_height, True
+
+
+def measure_commentary_item_height(item, width, style, label_style):
+    if item['kind'] == 'definition':
+        label = item.get('label') or ''
+        body = item.get('text') or ''
+        label_text = f'{label} - ' if label else ''
+        label_width = measure_string(label_text, label_style.bold_font, style.size, label_style.char_spacing)
+        if label_text and label_width < width * 0.75:
+            first_width = max(1, width - label_width)
+            lines = wrap_text(body, first_width, style.font, style.size, style.char_spacing)
+            remaining = wrap_text(' '.join(lines[1:]), width, style.font, style.size,
+                                  style.char_spacing) if len(lines) > 1 else []
+            return (1 + len(remaining)) * style.leading
+        label_lines = 1 if label_text else 0
+        body_lines = len(wrap_text(body, width, style.font, style.size, style.char_spacing))
+        return (label_lines + body_lines) * style.leading
+    marker_width = measure_marker_width(item.get('marker'), style)
+    first_line_width = width - marker_width if item.get('marker') else width
+    return len(wrap_text(item.get('text') or '', first_line_width, style.font,
+                         style.size, style.char_spacing)) * style.leading
+
+
+def measure_section_heading_height(layout):
+    return layout.rule_margin_above + layout.rule_margin_below
+
+
+def annotation_text_style(layout):
+    return TextStyle(font=layout.annotation_font,
+                     bold_font=bold_font_for(layout.annotation_font),
+                     size=layout.annotation_font_size,
+                     leading=layout.annotation_font_size * layout.annotation_line_spacing,
+                     char_spacing=layout.annotation_kerning,
+                     color=grayscale_color(layout.annotation_gray))
 
 
 def measure_string(text, font, size, char_spacing=0):
@@ -388,7 +608,7 @@ def draw_book_and_definitions(pdf, data, layout, y):
 
     text_height = measure_paragraph_block(data.paragraphs, text_width, text_style,
                                           text_layout=layout.text_layout)
-    definition_items = format_definitions(data.definitions)
+    definition_items = format_definitions(sort_definitions_alpha(data.definitions))
     side_height = 0 if layout.one_column_top else measure_labeled_items(definition_items, side_width, side_style, title_style)
     block_height = max(layout.top_min_height, text_height, side_height)
 
@@ -403,9 +623,8 @@ def draw_book_and_definitions(pdf, data, layout, y):
 def draw_annotation_sections(pdf, data, layout, y):
     y = draw_commentary_columns(pdf, data, layout, y)
     sections = [
-        ('Book references', format_references(data.references)),
-        ('Other references', format_sources(data.sources)),
-        ('Topic tags', format_topics(data.topics)),
+        ('Book references', format_references(sort_ranked_items(data.references))),
+        ('Other references', format_sources(sort_ranked_items(data.sources))),
     ]
     for heading, items in sections:
         if not items:
@@ -432,7 +651,7 @@ def draw_annotation_sections(pdf, data, layout, y):
 def draw_commentary_columns(pdf, data, layout, y):
     items = []
     if layout.one_column_top:
-        items.extend(format_definition_commentary_items(data.definitions))
+        items.extend(format_definition_commentary_items(sort_definitions_alpha(data.definitions)))
     items.extend(format_commentary(data.commentary))
     if not items:
         return y
@@ -478,11 +697,7 @@ def advance_annotation_column(pdf, layout, data, columns, column_index):
     column_index += 1
     if column_index < len(columns):
         return getattr(data, 'annotation_top_y', layout.page_size[1] - layout.top_margin), column_index, columns
-    pdf.showPage()
-    y = layout.page_size[1] - layout.top_margin
-    y = draw_section_heading(pdf, None, layout, y, data=data)
-    data.annotation_top_y = y
-    return y, 0, columns
+    return layout.bottom_margin, len(columns) - 1, columns
 
 
 def ensure_annotation_line_space(pdf, layout, data, columns, column_index, y):
@@ -617,15 +832,6 @@ def format_sources(rows):
         if row.notes:
             bits.append(row.notes)
         items.append(' - '.join(bits))
-    return items
-
-
-def format_topics(rows):
-    items = []
-    for link in rows:
-        topic = link.topic.name if link.topic else 'Topic'
-        note = f' - {link.notes}' if link.notes else ''
-        items.append(f'{topic}{note}')
     return items
 
 
@@ -1119,5 +1325,4 @@ def wrap_text(text, width, font, size, char_spacing=0):
 def ensure_space(pdf, layout, y, needed):
     if y - needed >= layout.bottom_margin:
         return y
-    pdf.showPage()
-    return layout.page_size[1] - layout.top_margin
+    return y

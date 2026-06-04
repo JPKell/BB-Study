@@ -116,6 +116,9 @@ def _sync_sqlite_schema():
         db.session.execute(text('ALTER TABLE content_topics ADD COLUMN end_content_id INTEGER'))
         db.session.execute(text('UPDATE content_topics SET end_content_id = book_content_id WHERE end_content_id IS NULL'))
         db.session.commit()
+    if 'rank' not in content_topic_columns:
+        db.session.execute(text('ALTER TABLE content_topics ADD COLUMN rank INTEGER'))
+        db.session.commit()
     source_columns = {col['name'] for col in inspector.get_columns('sources')}
     source_schema_updates = {
         'book_id': 'INTEGER',
@@ -129,6 +132,9 @@ def _sync_sqlite_schema():
         if column not in source_columns:
             db.session.execute(text(f'ALTER TABLE sources ADD COLUMN {column} {column_type}'))
             db.session.commit()
+    if 'rank' not in source_columns:
+        db.session.execute(text('ALTER TABLE sources ADD COLUMN rank INTEGER'))
+        db.session.commit()
     if 'verse' in source_columns or 'line' in source_columns:
         db.session.execute(text('UPDATE sources SET verse = line WHERE verse IS NULL AND line IS NOT NULL'))
         db.session.commit()
@@ -137,6 +143,9 @@ def _sync_sqlite_schema():
     if 'verse' not in commentary_columns:
         db.session.execute(text('ALTER TABLE commentary ADD COLUMN verse INTEGER'))
         db.session.execute(text('UPDATE commentary SET verse = line WHERE verse IS NULL AND line IS NOT NULL'))
+        db.session.commit()
+    if 'rank' not in commentary_columns:
+        db.session.execute(text('ALTER TABLE commentary ADD COLUMN rank INTEGER'))
         db.session.commit()
 
     reference_columns = {col['name'] for col in inspector.get_columns('book_references')}
@@ -147,6 +156,14 @@ def _sync_sqlite_schema():
     if 'target_verse' not in reference_columns:
         db.session.execute(text('ALTER TABLE book_references ADD COLUMN target_verse INTEGER'))
         db.session.execute(text('UPDATE book_references SET target_verse = target_line WHERE target_verse IS NULL AND target_line IS NOT NULL'))
+        db.session.commit()
+    if 'rank' not in reference_columns:
+        db.session.execute(text('ALTER TABLE book_references ADD COLUMN rank INTEGER'))
+        db.session.commit()
+
+    dictionary_lookup_columns = {col['name'] for col in inspector.get_columns('dictionary_lookup')}
+    if 'rank' not in dictionary_lookup_columns:
+        db.session.execute(text('ALTER TABLE dictionary_lookup ADD COLUMN rank INTEGER'))
         db.session.commit()
 
 

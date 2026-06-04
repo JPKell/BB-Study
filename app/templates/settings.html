@@ -272,17 +272,31 @@
 
 {% block scripts %}
 <script>
+const EXPORT_SETTING_DEFAULTS = {{ export_setting_defaults|tojson }};
+const EXPORT_PROFILE_SETTING_KEYS = {{ export_profile_setting_keys|list|tojson }};
+const EXPORT_PAGE_SIZE_PROFILE_PREFIXES = {{ export_page_size_profile_prefixes|tojson }};
+let activeExportPageSize = {{ export_settings.export_page_size|tojson }};
+let applyingExportProfile = false;
+
 document.querySelectorAll('.export-setting-input').forEach(input => {
   input.addEventListener('input', () => {
     updateGrayControl(input);
   });
-  input.addEventListener('change', () => {
-    const value = input.type === 'checkbox' ? (input.checked ? '1' : '0') : input.value;
-    fetch(`/api/settings/${input.dataset.settingKey}`, {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({value})
-    }).then(refreshPreview);
+  input.addEventListener('change', async () => {
+    if (applyingExportProfile) return;
+    const key = input.dataset.settingKey;
+    if (key === 'export_page_size') {
+      const nextPageSize = input.value;
+      if (nextPageSize === activeExportPageSize) return;
+      await saveCurrentExportProfile(activeExportPageSize);
+      await saveSetting('export_page_size', nextPageSize);
+      activeExportPageSize = nextPageSize;
+      await loadExportProfile(nextPageSize);
+      refreshPreview();
+      return;
+    }
+    await saveProfileSetting(activeExportPageSize, key, inputValue(input));
+    refreshPreview();
   });
 });
 
@@ -294,6 +308,61 @@ function updateGrayControl(input) {
   const swatch = document.querySelector(`[data-gray-swatch="${input.dataset.graySwatch}"]`);
   if (label) label.textContent = input.value;
   if (swatch) swatch.style.setProperty('--gray-level', `${input.value}%`);
+}
+
+function inputValue(input) {
+  return input.type === 'checkbox' ? (input.checked ? '1' : '0') : input.value;
+}
+
+function settingInput(key) {
+  return document.querySelector(`.export-setting-input[data-setting-key="${CSS.escape(key)}"]`);
+}
+
+function profileSettingKey(pageSize, key) {
+  const prefix = EXPORT_PAGE_SIZE_PROFILE_PREFIXES[pageSize] || EXPORT_PAGE_SIZE_PROFILE_PREFIXES.letter;
+  return `${prefix}_${key.replace(/^export_/, '')}`;
+}
+
+function saveSetting(key, value) {
+  return fetch(`/api/settings/${key}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({value})
+  });
+}
+
+function saveProfileSetting(pageSize, key, value) {
+  return saveSetting(profileSettingKey(pageSize, key), value);
+}
+
+function saveCurrentExportProfile(pageSize) {
+  const saves = EXPORT_PROFILE_SETTING_KEYS.map(key => {
+    const input = settingInput(key);
+    return input ? saveProfileSetting(pageSize, key, inputValue(input)) : Promise.resolve();
+  });
+  return Promise.all(saves);
+}
+
+async function loadExportProfile(pageSize) {
+  const settings = await fetch('/api/settings').then(response => response.json());
+  applyingExportProfile = true;
+  EXPORT_PROFILE_SETTING_KEYS.forEach(key => {
+    const input = settingInput(key);
+    if (!input) return;
+    const profileKey = profileSettingKey(pageSize, key);
+    const value = settings[profileKey] ?? settings[key] ?? EXPORT_SETTING_DEFAULTS[key] ?? '';
+    applySettingInputValue(input, value);
+    updateGrayControl(input);
+  });
+  applyingExportProfile = false;
+}
+
+function applySettingInputValue(input, value) {
+  if (input.type === 'checkbox') {
+    input.checked = ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+    return;
+  }
+  input.value = value;
 }
 
 function refreshPreview() {

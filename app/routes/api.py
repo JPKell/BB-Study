@@ -80,6 +80,71 @@ def _content_range_text(start_id, end_id=None):
     return _combine_content_fragments(_content_range_rows(start_id, end_id))
 
 
+def _rank_value(row):
+    rank = getattr(row, 'rank', None)
+    if rank is None or rank < 1:
+        return 1000000
+    return rank
+
+
+def _row_order_value(row):
+    created_at = getattr(row, 'created_at', None) or datetime.min
+    return (created_at, getattr(row, 'id', 0) or 0)
+
+
+def _parse_rank(value):
+    if value in (None, ''):
+        return None
+    try:
+        rank = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(1, rank)
+
+
+def _apply_rank(row, scope_query, requested_rank=None):
+    scope_rows = scope_query.all() if hasattr(scope_query, 'all') else scope_query
+    rows = [item for item in scope_rows if not _same_rank_row(item, row)]
+    rows.sort(key=lambda item: (_rank_value(item), *_row_order_value(item)))
+    rank = _parse_rank(requested_rank)
+    if rank is None:
+        rank = _rank_value(row)
+        if rank >= 1000000:
+            rank = len(rows) + 1
+    rank = min(rank, len(rows) + 1)
+    rows.insert(rank - 1, row)
+    for index, item in enumerate(rows, start=1):
+        item.rank = index
+
+
+def _same_rank_row(left, right):
+    return left.__class__ is right.__class__ and getattr(left, 'id', None) == getattr(right, 'id', None)
+
+
+def _dictionary_rank_scope(book_id, page):
+    return (DictionaryLookup.query
+            .join(BookLocation)
+            .filter(BookLocation.book_id == book_id, BookLocation.page == page))
+
+
+def _topic_rank_scope(book_id, page):
+    return (ContentTopic.query
+            .join(BookContent, ContentTopic.book_content_id == BookContent.id)
+            .filter(BookContent.book_id == book_id, BookContent.page == page))
+
+
+def _page_annotation_rank_scope(book_id, page):
+    if not book_id or page in (None, ''):
+        return []
+    rows = list(Commentary.query.filter_by(book_id=book_id, page=page).all())
+    rows.extend(BookReference.query.filter(BookReference.source_book_id == book_id,
+                                           BookReference.source_page == page).all())
+    rows.extend(Source.query.filter_by(book_id=book_id, page=page).all())
+    rows.extend(_dictionary_rank_scope(book_id, page).all())
+    rows.extend(_topic_rank_scope(book_id, page).all())
+    return rows
+
+
 def _sync_location_from_line_text(location):
     """Find imported content matching a location's line text and refresh fields."""
     if not location.book_id or not location.line_text:
@@ -473,8 +538,10 @@ def create_content_topic():
             notes=notes,
         )
         db.session.add(link)
+        db.session.flush()
     elif notes is not None:
         link.notes = notes
+    _apply_rank(link, _page_annotation_rank_scope(start.book_id, start.page), data.get('rank'))
     db.session.commit()
     return _ok(link.to_dict(), 'Topic applied')
 
@@ -555,6 +622,10 @@ def update_content_topic(link_id):
 
     if 'notes' in data:
         link.notes = data.get('notes')
+
+    content = BookContent.query.get(link.book_content_id)
+    if content and ('rank' in data or link.rank is None):
+        _apply_rank(link, _page_annotation_rank_scope(content.book_id, content.page), data.get('rank'))
 
     db.session.commit()
     return _ok(link.to_dict(), 'Content topic updated')
@@ -783,6 +854,10 @@ def create_dictionary_lookup():
         book_location_id=data['book_location_id'],
     )
     db.session.add(lk)
+    db.session.flush()
+    location = lk.location
+    if location:
+        _apply_rank(lk, _page_annotation_rank_scope(location.book_id, location.page), data.get('rank'))
     db.session.commit()
     return _ok(lk.to_dict(), 'Lookup created'), 201
 
@@ -790,6 +865,22 @@ def create_dictionary_lookup():
 @api_bp.route('/dictionary-lookup/<int:lid>', methods=['GET'])
 def get_dictionary_lookup(lid):
     return jsonify(DictionaryLookup.query.get_or_404(lid).to_dict())
+
+
+@api_bp.route('/dictionary-lookup/<int:lid>', methods=['PUT'])
+def update_dictionary_lookup(lid):
+    lk = DictionaryLookup.query.get_or_404(lid)
+    data = request.get_json(force=True) or {}
+    if 'dictionary_id' in data:
+        lk.dictionary_id = data.get('dictionary_id')
+    if 'book_location_id' in data:
+        lk.book_location_id = data.get('book_location_id')
+    db.session.flush()
+    location = lk.location
+    if location and ('rank' in data or lk.rank is None):
+        _apply_rank(lk, _page_annotation_rank_scope(location.book_id, location.page), data.get('rank'))
+    db.session.commit()
+    return _ok(lk.to_dict())
 
 
 @api_bp.route('/dictionary-lookup/<int:lid>', methods=['DELETE'])
@@ -840,6 +931,8 @@ def create_reference():
         comments=data.get('comments'),
     )
     db.session.add(ref)
+    db.session.flush()
+    _apply_rank(ref, _page_annotation_rank_scope(ref.source_book_id, ref.source_page), data.get('rank'))
     db.session.commit()
     return _ok(ref.to_dict(), 'Reference created'), 201
 
@@ -857,10 +950,12 @@ def update_reference(rid):
     fields = ('source_book_id', 'source_chapter', 'source_page', 'source_paragraph',
               'source_verse', 'source_line', 'target_book_id', 'target_chapter',
               'target_page', 'target_paragraph', 'target_verse', 'target_line',
-              'quoted_text', 'comments')
+              'quoted_text', 'comments', 'rank')
     for field in fields:
-        if field in data:
+        if field in data and field != 'rank':
             setattr(ref, field_aliases.get(field, field), data[field])
+    if 'rank' in data or ref.rank is None:
+        _apply_rank(ref, _page_annotation_rank_scope(ref.source_book_id, ref.source_page), data.get('rank'))
     db.session.commit()
     return _ok(ref.to_dict())
 
@@ -1064,7 +1159,9 @@ def list_commentary():
         q = q.filter_by(book_id=book_id)
     if page:
         q = q.filter_by(page=page)
-    return jsonify([c.to_dict() for c in q.order_by(Commentary.created_at.desc()).all()])
+    rows = q.all()
+    rows.sort(key=lambda c: (_rank_value(c), *_row_order_value(c)))
+    return jsonify([c.to_dict() for c in rows])
 
 
 @api_bp.route('/commentary', methods=['POST'])
@@ -1082,6 +1179,8 @@ def create_commentary():
         commentary_text=data['commentary_text'],
     )
     db.session.add(c)
+    db.session.flush()
+    _apply_rank(c, _page_annotation_rank_scope(c.book_id, c.page), data.get('rank'))
     db.session.commit()
     return _ok(c.to_dict(), 'Commentary created'), 201
 
@@ -1096,9 +1195,11 @@ def update_commentary(cid):
     c = Commentary.query.get_or_404(cid)
     data = request.get_json(force=True) or {}
     field_aliases = {'line': 'verse'}
-    for field in ('book_id', 'chapter', 'page', 'paragraph', 'verse', 'line', 'commentary_text'):
-        if field in data:
+    for field in ('book_id', 'chapter', 'page', 'paragraph', 'verse', 'line', 'commentary_text', 'rank'):
+        if field in data and field != 'rank':
             setattr(c, field_aliases.get(field, field), data[field])
+    if 'rank' in data or c.rank is None:
+        _apply_rank(c, _page_annotation_rank_scope(c.book_id, c.page), data.get('rank'))
     c.updated_at = datetime.utcnow()
     db.session.commit()
     return _ok(c.to_dict())
@@ -1126,7 +1227,9 @@ def list_sources():
         q = q.filter_by(book_id=book_id)
     if page:
         q = q.filter_by(page=page)
-    return jsonify([s.to_dict() for s in q.order_by(Source.name).all()])
+    rows = q.all()
+    rows.sort(key=lambda s: (_rank_value(s), *_row_order_value(s)))
+    return jsonify([s.to_dict() for s in rows])
 
 
 @api_bp.route('/sources', methods=['POST'])
@@ -1149,6 +1252,9 @@ def create_source():
         notes=data.get('notes'),
     )
     db.session.add(s)
+    db.session.flush()
+    if s.book_id and s.page:
+        _apply_rank(s, _page_annotation_rank_scope(s.book_id, s.page), data.get('rank'))
     db.session.commit()
     return _ok(s.to_dict(), 'Source created'), 201
 
@@ -1164,9 +1270,11 @@ def update_source(sid):
     data = request.get_json(force=True) or {}
     field_aliases = {'line': 'verse'}
     for field in ('book_id', 'page', 'chapter', 'paragraph', 'verse', 'line',
-                  'name', 'source_type', 'url', 'author', 'publication', 'publish_date', 'notes'):
-        if field in data:
+                  'name', 'source_type', 'url', 'author', 'publication', 'publish_date', 'notes', 'rank'):
+        if field in data and field != 'rank':
             setattr(s, field_aliases.get(field, field), data[field])
+    if s.book_id and s.page and ('rank' in data or s.rank is None):
+        _apply_rank(s, _page_annotation_rank_scope(s.book_id, s.page), data.get('rank'))
     db.session.commit()
     return _ok(s.to_dict())
 
@@ -1193,19 +1301,20 @@ def page_summary():
                BookContent.query.filter_by(book_id=book_id, page=page)
                .order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id).all()]
 
-    commentary = [c.to_dict() for c in
-                  Commentary.query.filter_by(book_id=book_id, page=page)
-                  .order_by(Commentary.created_at).all()]
+    commentary_rows = Commentary.query.filter_by(book_id=book_id, page=page).all()
+    commentary_rows.sort(key=lambda c: (_rank_value(c), *_row_order_value(c)))
+    commentary = [c.to_dict() for c in commentary_rows]
 
-    refs = [r.to_dict() for r in
-            BookReference.query.filter(
+    ref_rows = (BookReference.query.filter(
                 BookReference.source_book_id == book_id,
                 BookReference.source_page == page
-            ).order_by(BookReference.created_at).all()]
+            ).all())
+    ref_rows.sort(key=lambda r: (_rank_value(r), *_row_order_value(r)))
+    refs = [r.to_dict() for r in ref_rows]
 
-    sources = [s.to_dict() for s in
-               Source.query.filter_by(book_id=book_id, page=page)
-               .order_by(Source.created_at).all()]
+    source_rows = Source.query.filter_by(book_id=book_id, page=page).all()
+    source_rows.sort(key=lambda s: (_rank_value(s), *_row_order_value(s)))
+    sources = [s.to_dict() for s in source_rows]
 
     # Dictionary lookups via book locations
     locs = BookLocation.query.filter_by(book_id=book_id, page=page).all()
@@ -1215,6 +1324,7 @@ def page_summary():
         lookups = DictionaryLookup.query.filter(
             DictionaryLookup.book_location_id.in_(loc_ids)
         ).all()
+        lookups.sort(key=lambda lk: (_rank_value(lk), lk.id or 0))
         dict_lookups = [lk.to_dict() for lk in lookups]
 
     content_ids = [c['id'] for c in content]
@@ -1230,7 +1340,9 @@ def page_summary():
                 link.end_content_id or link.book_content_id,
             )
             if low_id <= page_high_id and high_id >= page_low_id:
-                topic_links.append(link.to_dict())
+                topic_links.append(link)
+        topic_links.sort(key=lambda link: (_rank_value(link), *_row_order_value(link)))
+        topic_links = [link.to_dict() for link in topic_links]
 
     return jsonify({
         'content': content,

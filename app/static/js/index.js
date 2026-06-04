@@ -307,9 +307,10 @@ function loadPageSummary() {
             ['Verse', c.verse || c.line],
           ]);
           summaryCards.push(makeSummaryCard('Commentary', 'commentary',
-            `<p class="mb-1">${escHtml(c.commentary_text)}</p>
+            `${rankBadge(c.rank)}
+             <p class="mb-1">${escHtml(c.commentary_text)}</p>
              ${loc ? `<small class="text-muted">${escHtml(loc)}</small>` : ''}`,
-            c.id, 'commentary', 'commentary'));
+            c.id, 'commentary', 'commentary', c.rank));
         });
       }
 
@@ -317,11 +318,12 @@ function loadPageSummary() {
       if (data.references && data.references.length) {
         data.references.forEach(r => {
           summaryCards.push(makeSummaryCard('Book Reference', 'reference',
-            `<p class="mb-1 fst-italic">${escHtml(r.quoted_text || '')}</p>
+            `${rankBadge(r.rank)}
+             <p class="mb-1 fst-italic">${escHtml(r.quoted_text || '')}</p>
              <p class="mb-0 small">→ <strong>${escHtml(r.target_book_title || '')}</strong>
                Ch: ${escHtml(r.target_chapter || '—')} · Pg: ${escHtml(r.target_page || '—')}</p>
              ${r.comments ? `<p class="text-muted small mb-0">${escHtml(r.comments)}</p>` : ''}`,
-            r.id, 'references', 'reference'));
+            r.id, 'references', 'reference', r.rank));
         });
       }
 
@@ -330,11 +332,12 @@ function loadPageSummary() {
         data.sources.forEach(s => {
           const ref = s.url ? `<p class="mb-1">${escHtml(s.url)}</p>` : '';
           summaryCards.push(makeSummaryCard('Other Ref', 'reference',
-            `<div class="mb-1"><span class="badge text-bg-secondary">${escHtml(s.source_type || 'other')}</span></div>
+            `${rankBadge(s.rank)}
+             <div class="mb-1"><span class="badge text-bg-secondary">${escHtml(s.source_type || 'other')}</span></div>
              <p class="mb-1 fw-semibold">${escHtml(s.name || '')}</p>
              ${ref}
              ${s.notes ? `<p class="text-muted small mb-0">${escHtml(s.notes)}</p>` : ''}`,
-            s.id, 'sources', 'source'));
+            s.id, 'sources', 'source', s.rank));
         });
       }
 
@@ -348,11 +351,12 @@ function loadPageSummary() {
         data.topics.forEach(link => {
           const loc = `p. ${escHtml(link.page || '')} · ¶${link.paragraph || ''} · v${link.verse || ''}`;
           summaryCards.push(makeSummaryCard('Tag', 'reference',
-            `<div class="mb-1"><span class="badge text-bg-secondary">${escHtml(link.topic_name || '')}</span></div>
+            `${rankBadge(link.rank)}
+             <div class="mb-1"><span class="badge text-bg-secondary">${escHtml(link.topic_name || '')}</span></div>
              <p class="mb-1 small text-muted">${loc}</p>
              <p class="mb-1 topic-snippet">${escHtml(makeTextSnippet(link.content || ''))}</p>
              ${link.notes ? `<p class="text-muted small mb-0">${escHtml(link.notes)}</p>` : ''}`,
-            link.id, 'content-topics', 'topic-link'));
+            link.id, 'content-topics', 'topic-link', link.rank));
         });
       }
 
@@ -360,6 +364,7 @@ function loadPageSummary() {
         summaryEl.innerHTML = '<p class="text-muted small mb-0">No annotations for this page yet.</p>';
         return;
       }
+      assignFallbackRanks(summaryCards);
       renderBalancedSummaryCards(summaryEl, summaryCards);
     })
     .catch(() => {
@@ -368,23 +373,44 @@ function loadPageSummary() {
     });
 }
 
-function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationType) {
+function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationType, rank) {
   const card = document.createElement('div');
   card.className = `card summary-card ${typeClass} annotation-card`;
   card.setAttribute('role', 'button');
   card.setAttribute('tabindex', '0');
   card.dataset.annotationType = annotationType;
   card.dataset.id = id;
+  card.dataset.rank = rank || '';
   card.innerHTML = `
       <div class="card-header d-flex justify-content-between align-items-center py-1 px-2">
         <small class="fw-semibold text-uppercase">${label}</small>
-        <button class="btn btn-sm btn-outline-danger border-0 py-0"
-                onclick="event.stopPropagation(); deleteSummaryItem('${endpoint}', ${id})" title="Delete">
-          <i class="bi bi-trash"></i>
-        </button>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Rank and delete">
+          ${rankMoveButtons(endpoint, id, rank)}
+          <button class="btn btn-sm btn-outline-danger border-0 py-0"
+                  onclick="event.stopPropagation(); deleteSummaryItem('${endpoint}', ${id})" title="Delete">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
       </div>
       <div class="card-body py-2 px-2 small">${bodyHtml}</div>`;
   return card;
+}
+
+function rankBadge(rank) {
+  return rank ? `<div class="mb-1"><span class="badge text-bg-light text-secondary">Rank ${escHtml(rank)}</span></div>` : '';
+}
+
+function rankMoveButtons(endpoint, id, rank) {
+  const rankValue = rank || '';
+  return `
+    <button class="btn btn-sm btn-outline-secondary border-0 py-0 rank-move-btn" type="button"
+            data-endpoint="${endpoint}" data-id="${id}" data-rank="${rankValue}" data-direction="-1" title="Move up">
+      <i class="bi bi-arrow-up"></i>
+    </button>
+    <button class="btn btn-sm btn-outline-secondary border-0 py-0 rank-move-btn" type="button"
+            data-endpoint="${endpoint}" data-id="${id}" data-rank="${rankValue}" data-direction="1" title="Move down">
+      <i class="bi bi-arrow-down"></i>
+    </button>`;
 }
 
 function makeDictionarySummaryCard(entries) {
@@ -394,13 +420,17 @@ function makeDictionarySummaryCard(entries) {
     <div class="dictionary-summary-row d-flex align-items-start gap-2">
       <button class="dictionary-summary-entry text-start flex-grow-1" type="button"
               data-annotation-type="dictionary" data-id="${entry.id}">
+        ${entry.rank ? `<span class="badge text-bg-light text-secondary me-1">Rank ${escHtml(entry.rank)}</span>` : ''}
         <span class="fw-semibold">${escHtml(entry.word_phrase || '')}</span>
         <span class="text-muted"> — ${escHtml(makeTextSnippet(entry.meaning || '', ''))}</span>
       </button>
-      <button class="btn btn-sm btn-outline-danger border-0 py-0 dictionary-summary-delete"
-              type="button" data-id="${entry.id}" title="Delete">
-        <i class="bi bi-trash"></i>
-      </button>
+      <div class="btn-group btn-group-sm" role="group" aria-label="Rank and delete">
+        ${rankMoveButtons('dictionary-lookup', entry.id, entry.rank)}
+        <button class="btn btn-sm btn-outline-danger border-0 py-0 dictionary-summary-delete"
+                type="button" data-id="${entry.id}" title="Delete">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
     </div>`).join('');
   card.innerHTML = `
       <div class="card-header py-1 px-2">
@@ -420,11 +450,43 @@ function renderBalancedSummaryCards(summaryEl, cards) {
     return column;
   });
 
+  cards.sort((a, b) => summaryCardRank(a) - summaryCardRank(b));
   measureSummaryCards(cards, columns[0]).forEach(({ card }) => {
     const shortestColumn = columns.reduce((shortest, column) =>
       column.scrollHeight < shortest.scrollHeight ? column : shortest);
     shortestColumn.appendChild(card);
   });
+}
+
+function assignFallbackRanks(cards) {
+  const buttons = cards.flatMap(card => [...card.querySelectorAll('.rank-move-btn')]);
+  let maxRank = buttons
+    .map(btn => parseInt(btn.dataset.rank))
+    .filter(Boolean)
+    .reduce((max, rank) => Math.max(max, rank), 0);
+  buttons.forEach(btn => {
+    if (parseInt(btn.dataset.rank)) return;
+    maxRank += 1;
+    btn.dataset.rank = String(maxRank);
+  });
+  cards.forEach(card => {
+    if (parseInt(card.dataset.rank)) return;
+    const rank = [...card.querySelectorAll('.rank-move-btn')]
+      .map(btn => parseInt(btn.dataset.rank))
+      .filter(Boolean)
+      .sort((a, b) => a - b)[0];
+    if (rank) card.dataset.rank = String(rank);
+  });
+}
+
+function summaryCardRank(card) {
+  const rank = parseInt(card.dataset.rank);
+  if (rank) return rank;
+  const rowRank = [...card.querySelectorAll('.rank-move-btn')]
+    .map(btn => parseInt(btn.dataset.rank))
+    .filter(Boolean)
+    .sort((a, b) => a - b)[0];
+  return rowRank || Number.MAX_SAFE_INTEGER;
 }
 
 function measureSummaryCards(cards, sampleColumn) {
@@ -441,7 +503,7 @@ function measureSummaryCards(cards, sampleColumn) {
   });
 
   measureColumn.remove();
-  return measured.sort((a, b) => b.height - a.height);
+  return measured;
 }
 
 function getSummaryColumnCount(summaryEl) {
@@ -452,6 +514,13 @@ function getSummaryColumnCount(summaryEl) {
 }
 
 document.addEventListener('click', e => {
+  const rankMove = e.target.closest('.rank-move-btn');
+  if (rankMove) {
+    e.preventDefault();
+    e.stopPropagation();
+    moveSummaryRank(rankMove);
+    return;
+  }
   const dictionaryDelete = e.target.closest('.dictionary-summary-delete');
   if (dictionaryDelete) {
     deleteSummaryItem('dictionary-lookup', dictionaryDelete.dataset.id);
@@ -466,6 +535,29 @@ document.addEventListener('click', e => {
   if (!card) return;
   loadAnnotationIntoEditor(card.dataset.annotationType, card.dataset.id);
 });
+
+async function moveSummaryRank(button) {
+  const currentRank = parseInt(button.dataset.rank);
+  const direction = parseInt(button.dataset.direction);
+  if (!currentRank || !direction) {
+    showAlert('Save this item once before moving its rank', 'warning');
+    return;
+  }
+  const nextRank = currentRank + direction;
+  if (nextRank < 1) return;
+  button.disabled = true;
+  const res = await fetch(`/api/${button.dataset.endpoint}/${button.dataset.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rank: nextRank }),
+  }).then(r => r.json()).catch(() => ({ error: 'Rank update failed' }));
+  if (res.error) {
+    showAlert(res.error || 'Rank update failed', 'danger');
+    button.disabled = false;
+    return;
+  }
+  loadPageSummary();
+}
 
 function deleteSummaryItem(endpoint, id) {
   if (!confirm('Delete this item?')) return;
@@ -483,6 +575,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('commPara', data.paragraph || '');
     setValue('commLine', data.verse || data.line || '');
     setValue('commText', data.commentary_text || '');
+    setValue('commRank', data.rank || '');
     showTab('#tabComm');
   } else if (type === 'reference') {
     const data = await fetch(`/api/references/${id}`).then(r => r.json());
@@ -499,6 +592,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('refTgtLine', data.target_verse || data.target_line || '');
     setValue('refQuoted', data.quoted_text || '');
     setValue('refComments', data.comments || '');
+    setValue('refRank', data.rank || '');
     showTab('#tabRef');
   } else if (type === 'dictionary') {
     const lookup = await fetch(`/api/dictionary-lookup/${id}`).then(r => r.json());
@@ -513,6 +607,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('dictPara', lookup.paragraph || '');
     setValue('dictLine', lookup.line_number || '');
     setValue('dictLineText', lookup.line_text || '');
+    setValue('dictRank', lookup.rank || '');
     showTab('#tabDict');
   } else if (type === 'topic-link') {
     const link = await fetch(`/api/content-topics/${id}`).then(r => r.json());
@@ -529,6 +624,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('topicContentIds', link.low_content_id && link.high_content_id ? `${link.low_content_id},${link.high_content_id}` : '');
     setValue('topicStartContentId', link.start_content_id || link.book_content_id || '');
     setValue('topicEndContentId', link.end_content_id || link.start_content_id || link.book_content_id || '');
+    setValue('topicRank', link.rank || '');
     setTopicEditMode(true);
     saveTopicDraft();
     highlightTopicRange();
@@ -542,6 +638,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('srcAuthor', source.author || '');
     setValue('srcUrl', source.url || '');
     setValue('srcNotes', source.notes || '');
+    setValue('srcRank', source.rank || '');
     showTab('#tabSrc');
   }
 }
@@ -640,6 +737,7 @@ function selectVerse(fragment) {
   setValue('dictPara', selection.paragraph);
   setValue('dictLine', selection.verse);
   setValue('dictLineText', selection.fullText);
+  clearDictionaryEditState({ preservePage: true });
   setValue('refSrcChapter', selection.chapter);
   setValue('refSrcPage', selection.page);
   setValue('refSrcPara', selection.paragraph);
@@ -873,6 +971,39 @@ function setValue(id, value) {
   if (el) el.value = value;
 }
 
+function resetDictionaryForm() {
+  document.getElementById('dictForm')?.reset();
+  clearDictionaryEditState();
+  if (CURRENT_PAGE) setValue('dictPage', CURRENT_PAGE);
+}
+
+function clearDictionaryEditState({ preservePage = false } = {}) {
+  const page = document.getElementById('dictPage')?.value || CURRENT_PAGE || '';
+  ['dictEntryId', 'dictLookupId', 'dictLocationId'].forEach(id => setValue(id, ''));
+  if (!preservePage && CURRENT_PAGE) setValue('dictPage', CURRENT_PAGE);
+  if (preservePage) setValue('dictPage', page);
+}
+
+function resetReferenceForm() {
+  document.getElementById('refForm')?.reset();
+  currentRefEditId = null;
+  setValue('refId', '');
+  if (CURRENT_PAGE) setValue('refSrcPage', CURRENT_PAGE);
+}
+
+function resetCommentaryForm() {
+  document.getElementById('commForm')?.reset();
+  currentCommEditId = null;
+  setValue('commId', '');
+  if (CURRENT_PAGE) setValue('commPage', CURRENT_PAGE);
+}
+
+function resetSourceForm() {
+  document.getElementById('srcForm')?.reset();
+  currentSourceEditId = null;
+  setValue('srcId', '');
+}
+
 function combineVerseText(parts) {
   return parts.reduce((text, part) => {
     if (!part) return text;
@@ -919,8 +1050,22 @@ document.getElementById('dictForm').addEventListener('submit', async function (e
     }).then(r => r.json());
     if (locRes.error) { showAlert(locRes.error, 'danger'); return; }
 
+    const lookupId = document.getElementById('dictLookupId').value;
+    if (lookupId) {
+      const lookupRes = await fetch(`/api/dictionary-lookup/${lookupId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dictionary_id: parseInt(dictEntryId),
+          book_location_id: parseInt(dictLocationId),
+          rank: parseInt(document.getElementById('dictRank').value) || null,
+        }),
+      }).then(r => r.json());
+      if (lookupRes.error) { showAlert(lookupRes.error, 'danger'); return; }
+    }
+
     showAlert('Dictionary annotation updated', 'success');
-    this.reset();
+    resetDictionaryForm();
     loadPageSummary();
     return;
   }
@@ -959,12 +1104,15 @@ document.getElementById('dictForm').addEventListener('submit', async function (e
   await fetch('/api/dictionary-lookup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dictionary_id: dictId, book_location_id: locRes.data.id }),
+    body: JSON.stringify({
+      dictionary_id: dictId,
+      book_location_id: locRes.data.id,
+      rank: parseInt(document.getElementById('dictRank').value) || null,
+    }),
   });
 
   showAlert(`"${word}" saved to dictionary`, 'success');
-  this.reset();
-  document.getElementById('dictPage').value = CURRENT_PAGE || '';
+  resetDictionaryForm();
   loadPageSummary();
 });
 
@@ -991,6 +1139,7 @@ document.getElementById('refForm').addEventListener('submit', async function (e)
     target_verse: parseInt(document.getElementById('refTgtLine').value) || null,
     quoted_text: document.getElementById('refQuoted').value.trim(),
     comments: document.getElementById('refComments').value.trim(),
+    rank: parseInt(document.getElementById('refRank').value) || null,
   };
 
   const res = await fetch(refId ? `/api/references/${refId}` : '/api/references', {
@@ -1001,9 +1150,7 @@ document.getElementById('refForm').addEventListener('submit', async function (e)
 
   if (res.error) { showAlert(res.error, 'danger'); return; }
   showAlert(refId ? 'Reference updated' : 'Reference saved', 'success');
-  this.reset();
-  currentRefEditId = null;
-  setValue('refId', '');
+  resetReferenceForm();
   loadPageSummary();
 });
 
@@ -1029,6 +1176,7 @@ async function saveCommentary() {
     paragraph: parseInt(document.getElementById('commPara').value) || null,
     verse: parseInt(document.getElementById('commLine').value) || null,
     commentary_text: text,
+    rank: parseInt(document.getElementById('commRank').value) || null,
   };
 
   const res = await fetch(commId ? `/api/commentary/${commId}` : '/api/commentary', {
@@ -1039,10 +1187,7 @@ async function saveCommentary() {
 
   if (res.error) { showAlert(res.error, 'danger'); return; }
   showAlert(commId ? 'Commentary updated' : 'Commentary saved', 'success');
-  document.getElementById('commForm').reset();
-  currentCommEditId = null;
-  setValue('commId', '');
-  if (CURRENT_PAGE) setValue('commPage', CURRENT_PAGE);
+  resetCommentaryForm();
   loadPageSummary();
 }
 
@@ -1088,6 +1233,7 @@ function readTopicDraft() {
     select: document.getElementById('topicSelect')?.value || '',
     newName: document.getElementById('topicNewName')?.value || '',
     notes: document.getElementById('topicNotes')?.value || '',
+    rank: document.getElementById('topicRank')?.value || '',
     chapter: document.getElementById('topicChapter')?.value || '',
     page: document.getElementById('topicPage')?.value || '',
     para: document.getElementById('topicPara')?.value || '',
@@ -1123,6 +1269,7 @@ function restoreTopicDraft() {
   setValue('topicSelect', draft.select || '');
   setValue('topicNewName', draft.newName || '');
   setValue('topicNotes', draft.notes || '');
+  setValue('topicRank', draft.rank || '');
   setValue('topicChapter', draft.chapter || '');
   setValue('topicPage', draft.page || CURRENT_PAGE || '');
   setValue('topicPara', draft.para || '');
@@ -1160,13 +1307,13 @@ document.getElementById('topicClearRangeBtn')?.addEventListener('click', () => {
   currentTopicLinkEditId = null;
   ['topicLinkId', 'topicContentIds', 'topicStartContentId', 'topicEndContentId',
    'topicChapter', 'topicPage', 'topicPara', 'topicVerse', 'topicSelectedText',
-   'topicNewName', 'topicNotes'].forEach(id => setValue(id, ''));
+   'topicNewName', 'topicNotes', 'topicRank'].forEach(id => setValue(id, ''));
   document.querySelectorAll('.verse-fragment.selected-verse').forEach(el => el.classList.remove('selected-verse'));
   setTopicEditMode(false);
   clearTopicDraft();
 });
 
-['topicSelect', 'topicNewName', 'topicNotes'].forEach(id => {
+['topicSelect', 'topicNewName', 'topicNotes', 'topicRank'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', saveTopicDraft);
   document.getElementById(id)?.addEventListener('change', saveTopicDraft);
 });
@@ -1207,6 +1354,7 @@ document.getElementById('topicForm').addEventListener('submit', async function (
         start_content_id: startContentId,
         end_content_id: endContentId,
         notes,
+        rank: parseInt(document.getElementById('topicRank').value) || null,
       }),
     }).then(r => r.json())
     : await fetch('/api/content-topics', {
@@ -1217,6 +1365,7 @@ document.getElementById('topicForm').addEventListener('submit', async function (
         start_content_id: startContentId || Math.min(...ids),
         end_content_id: endContentId || Math.max(...ids),
         notes,
+        rank: parseInt(document.getElementById('topicRank').value) || null,
       }),
     }).then(r => r.json());
 
@@ -1244,6 +1393,7 @@ document.getElementById('srcForm').addEventListener('submit', async function (e)
     author: document.getElementById('srcAuthor').value.trim(),
     url: document.getElementById('srcUrl').value.trim(),
     notes: document.getElementById('srcNotes').value.trim(),
+    rank: parseInt(document.getElementById('srcRank').value) || null,
   };
 
   const res = await fetch(srcId ? `/api/sources/${srcId}` : '/api/sources', {
@@ -1254,9 +1404,7 @@ document.getElementById('srcForm').addEventListener('submit', async function (e)
 
   if (res.error) { showAlert(res.error, 'danger'); return; }
   showAlert(srcId ? 'Source updated' : 'Source saved', 'success');
-  this.reset();
-  currentSourceEditId = null;
-  setValue('srcId', '');
+  resetSourceForm();
   loadPageSummary();
 });
 

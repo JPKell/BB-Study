@@ -8,6 +8,10 @@ EXPORT_TEXT_LAYOUTS = {'reflow_justified'}
 EXPORT_ALIGNMENTS = {'left', 'justify', 'center'}
 EXPORT_FONT_OPTIONS = {'Times-Roman', 'Helvetica', 'Courier'}
 EXPORT_PAGE_SIZES = {'letter', 'half_letter'}
+EXPORT_PAGE_SIZE_PROFILE_PREFIXES = {
+    'letter': 'export_letter',
+    'half_letter': 'export_half_letter',
+}
 EXPORT_SETTING_DEFAULTS = {
     'export_text_layout': 'reflow_justified',
     'export_page_size': 'letter',
@@ -59,6 +63,10 @@ EXPORT_SETTING_DEFAULTS = {
     'export_commentary_gray': '0',
     'export_annotation_gray': '0',
 }
+EXPORT_PROFILE_SETTING_KEYS = tuple(
+    key for key in EXPORT_SETTING_DEFAULTS
+    if key != 'export_page_size'
+)
 
 
 def get_theme():
@@ -96,6 +104,12 @@ def _get_setting(key, default=''):
     return setting.value if setting and setting.value != '' else default
 
 
+def _export_profile_key(page_size, key):
+    prefix = EXPORT_PAGE_SIZE_PROFILE_PREFIXES.get(page_size, EXPORT_PAGE_SIZE_PROFILE_PREFIXES['letter'])
+    suffix = key.removeprefix('export_')
+    return f'{prefix}_{suffix}'
+
+
 def get_export_text_layout():
     value = _get_setting('export_text_layout', 'reflow_justified')
     return value if value in EXPORT_TEXT_LAYOUTS else 'reflow_justified'
@@ -103,8 +117,15 @@ def get_export_text_layout():
 
 def get_export_setting_values():
     values = {}
+    page_size = _get_setting('export_page_size', EXPORT_SETTING_DEFAULTS['export_page_size'])
+    if page_size not in EXPORT_PAGE_SIZES:
+        page_size = EXPORT_SETTING_DEFAULTS['export_page_size']
+    values['export_page_size'] = page_size
     for key, default in EXPORT_SETTING_DEFAULTS.items():
-        values[key] = _get_setting(key, default)
+        if key == 'export_page_size':
+            continue
+        profile_key = _export_profile_key(page_size, key)
+        values[key] = _get_setting(profile_key, _get_setting(key, default))
     values['export_text_layout'] = (
         values['export_text_layout']
         if values['export_text_layout'] in EXPORT_TEXT_LAYOUTS
@@ -113,8 +134,6 @@ def get_export_setting_values():
     for key in ('export_book_alignment', 'export_definition_alignment', 'export_commentary_alignment'):
         if values.get(key) not in EXPORT_ALIGNMENTS:
             values[key] = EXPORT_SETTING_DEFAULTS[key]
-    if values.get('export_page_size') not in EXPORT_PAGE_SIZES:
-        values['export_page_size'] = EXPORT_SETTING_DEFAULTS['export_page_size']
     return values
 
 
@@ -442,6 +461,9 @@ def settings():
         return redirect(url_for('main.settings'))
     return render_template('settings.html', theme=theme,
                            export_settings=export_settings,
+                           export_setting_defaults=EXPORT_SETTING_DEFAULTS,
+                           export_profile_setting_keys=EXPORT_PROFILE_SETTING_KEYS,
+                           export_page_size_profile_prefixes=EXPORT_PAGE_SIZE_PROFILE_PREFIXES,
                            export_text_layout=export_settings['export_text_layout'],
                            preview_book=preview_book,
                            preview_page=preview_page,
