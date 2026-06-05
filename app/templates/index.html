@@ -110,6 +110,7 @@
                         data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
                         data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                         data-content-id="{{ item.id }}"
+                        data-content-mode="{{ content_mode }}"
                         data-raw-content="{{ item.content }}"
                         data-verse-key="{{ item.paragraph }}-{{ item.verse }}"
                         data-chapter="{{ item.chapter_name or item.chapter or '' }}"
@@ -144,6 +145,7 @@
                         data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
                         data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
                         data-content-id="{{ item.id }}"
+                        data-content-mode="{{ content_mode }}"
                         data-raw-content="{{ item.content }}"
                         data-verse-key="{{ verse_key }}"
                         data-chapter="{{ item.chapter_name or item.chapter or '' }}"
@@ -241,6 +243,7 @@
                     {% endif %}
                     <span class="line-text secondary-book-fragment"
                           data-content-id="{{ item.id }}"
+                          data-content-mode="{{ secondary_content_mode }}"
                           data-raw-content="{{ item.content }}">{{ item.content }} </span>
                   {% endfor %}
                   {% if secondary_page_content %}</div>{% endif %}
@@ -259,6 +262,7 @@
                     {% endif %}
                     <span class="secondary-book-fragment"
                           data-content-id="{{ item.id }}"
+                          data-content-mode="{{ secondary_content_mode }}"
                           data-raw-content="{{ item.content }}">{% if item.content.endswith('-') %}{{ item.content[:-1] }}{% else %}{{ item.content }} {% endif %}</span>
                   {% endfor %}
                   {% if secondary_page_content %}</div>{% endif %}
@@ -295,18 +299,23 @@
         <div class="tab-pane fade" id="pamphletBookPane">
           <div class="pamphlet-reader-pane" aria-label="Pamphlet viewer">
             <div class="pamphlet-reader-header">
-              <div>
+              <div class="pamphlet-reader-title-row">
                 <div class="fw-semibold"><i class="bi bi-file-earmark-text me-1"></i>Pamphlets</div>
                 <small class="text-muted" id="pamphletPanelStatus">Search or load a pamphlet</small>
               </div>
             </div>
             <div class="pamphlet-reader-search">
-              <div class="input-group input-group-sm">
-                <span class="input-group-text"><i class="bi bi-search"></i></span>
-                <input class="form-control" id="pamphletSearchQuery" type="text" placeholder="Search pamphlets">
-                <button class="btn btn-outline-primary" type="button" id="pamphletSearchBtn">
-                  <i class="bi bi-arrow-right"></i>
-                </button>
+              <div class="pamphlet-reader-controls-row">
+                <select class="form-select form-select-sm pamphlet-select" id="pamphletSelect" aria-label="Choose a pamphlet">
+                  <option value="">Loading pamphlets...</option>
+                </select>
+                <div class="input-group input-group-sm pamphlet-search-input">
+                  <span class="input-group-text"><i class="bi bi-search"></i></span>
+                  <input class="form-control" id="pamphletSearchQuery" type="text" placeholder="Search pamphlets">
+                  <button class="btn btn-outline-primary" type="button" id="pamphletSearchBtn">
+                    <i class="bi bi-arrow-right"></i>
+                  </button>
+                </div>
               </div>
               <div id="pamphletSearchResults" class="pamphlet-search-results small"></div>
             </div>
@@ -573,8 +582,13 @@
               <input type="text" class="form-control form-control-sm" id="srcAuthor">
             </div>
             <div class="mb-2">
-              <label class="form-label small mb-1">URL / Reference / Identifier</label>
-              <input type="text" class="form-control form-control-sm" id="srcUrl">
+              <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                <label class="form-label small mb-0">URLs / References / Identifiers</label>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="addSrcUrlBtn" aria-label="Add another reference" title="Add another reference">
+                  <i class="bi bi-plus-lg"></i>
+                </button>
+              </div>
+              <div id="srcUrlsContainer" class="source-url-fields"></div>
             </div>
             <div class="mb-2">
               <label class="form-label small mb-1">Publication / Notes</label>

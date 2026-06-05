@@ -129,14 +129,18 @@ html, body {
 .line-text:hover {
   background-color: rgba(var(--bs-primary-rgb), 0.12);
 }
-.verse-fragment {
+.verse-fragment,
+.secondary-book-fragment,
+.pamphlet-fragment {
   cursor: pointer;
 }
 .verse-fragment.selected-verse {
   background-color: rgba(var(--bs-warning-rgb), 0.32);
   box-shadow: 0 0 0 2px rgba(var(--bs-warning-rgb), 0.16);
 }
-.verse-fragment.editing-fragment {
+.verse-fragment.editing-fragment,
+.secondary-book-fragment.editing-fragment,
+.pamphlet-fragment.editing-fragment {
   display: inline-block;
   min-width: 8ch;
   background-color: var(--bs-body-bg);
@@ -310,6 +314,30 @@ html, body {
 [data-bs-theme="dark"] .pamphlet-reader-header {
   background: var(--bb-soft-amber);
 }
+.pamphlet-reader-title-row,
+.pamphlet-reader-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+.pamphlet-reader-title-row {
+  min-width: 0;
+}
+.pamphlet-reader-title-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pamphlet-select {
+  flex: 1 1 45%;
+  min-width: 14rem;
+}
+.pamphlet-search-input {
+  flex: 1 1 55%;
+  min-width: 13rem;
+}
 .pamphlet-search-results {
   max-height: 32vh;
   overflow-y: auto;
@@ -363,6 +391,13 @@ html, body {
   margin-bottom: 0.65rem;
   line-height: 1.55;
 }
+.source-url-fields {
+  display: grid;
+  gap: 0.35rem;
+}
+.source-reference-line {
+  overflow-wrap: anywhere;
+}
 
 .book-pane-body {
   padding: 0.85rem;
@@ -391,11 +426,21 @@ html, body {
 .reader-footer {
   min-height: 2rem;
 }
-.secondary-book-fragment {
-  cursor: default;
-}
-
 @media (max-width: 768px) {
+  .pamphlet-reader-title-row,
+  .pamphlet-reader-controls-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .pamphlet-reader-title-row small {
+    white-space: normal;
+  }
+  .pamphlet-select,
+  .pamphlet-search-input {
+    min-width: 0;
+    width: 100%;
+  }
   .book-pane-body,
   .book-content-scroll {
     padding-left: 0;

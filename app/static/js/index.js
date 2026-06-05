@@ -73,6 +73,7 @@ document.getElementById('verseBoldBtn')?.addEventListener('click', () => toggleS
 document.getElementById('verseItalicBtn')?.addEventListener('click', () => toggleSelectedVerseFormat('italic'));
 document.getElementById('saveFormatBtn')?.addEventListener('click', () => saveSelectedVerseFormat());
 document.getElementById('pageCenteredExportSwitch')?.addEventListener('change', savePageFormat);
+document.getElementById('addSrcUrlBtn')?.addEventListener('click', () => addSourceUrlField());
 
 function loadPage() {
   const page = document.getElementById('pageInput').value.trim();
@@ -242,6 +243,34 @@ document.getElementById('pamphletSearchQuery')?.addEventListener('input', e => {
     document.getElementById('pamphletSearchResults').innerHTML = '';
   }
 });
+document.getElementById('pamphletSelect')?.addEventListener('change', e => {
+  const pamphletId = parseInt(e.target.value, 10);
+  if (pamphletId) loadPamphlet(pamphletId);
+});
+
+function loadPamphletOptions() {
+  const select = document.getElementById('pamphletSelect');
+  if (!select) return;
+
+  fetch('/api/pamphlets')
+    .then(r => r.json())
+    .then(pamphlets => {
+      if (!pamphlets.length) {
+        select.innerHTML = '<option value="">No pamphlets available</option>';
+        return;
+      }
+      select.innerHTML = '<option value="">Choose a pamphlet...</option>' + pamphlets.map(p => {
+        const label = `${p.series || ''} ${p.title || ''}`.trim() || 'Untitled pamphlet';
+        return `<option value="${p.id}">${escHtml(label)}</option>`;
+      }).join('');
+      if (select.dataset.currentPamphletId) {
+        select.value = select.dataset.currentPamphletId;
+      }
+    })
+    .catch(() => {
+      select.innerHTML = '<option value="">Could not load pamphlets</option>';
+    });
+}
 
 function openPamphletPanel(pamphletId) {
   showBookPaneTab('#pamphletBookPane');
@@ -279,9 +308,13 @@ function loadPamphlet(pamphletId) {
   const status = document.getElementById('pamphletPanelStatus');
   const empty = document.getElementById('pamphletEmptyState');
   const view = document.getElementById('pamphletContentView');
+  const select = document.getElementById('pamphletSelect');
   if (status) status.textContent = 'Loading...';
   if (empty) empty.classList.add('d-none');
-  document.querySelector('.pamphlet-reader-search')?.classList.add('d-none');
+  if (select) {
+    select.dataset.currentPamphletId = String(pamphletId);
+    select.value = String(pamphletId);
+  }
   if (view) view.innerHTML = '<p class="text-muted small">Loading pamphlet text...</p>';
 
   Promise.all([
@@ -301,7 +334,7 @@ function loadPamphlet(pamphletId) {
     </div>${[...grouped.entries()].map(([page, pageRows]) => `
       <section class="pamphlet-page">
         <div class="pamphlet-page-label">Page ${escHtml(page || '—')}</div>
-        ${pageRows.map(row => `<p>${escHtml(row.content || '')}</p>`).join('')}
+        ${pageRows.map(row => `<p><span class="pamphlet-fragment" data-pamphlet-content-id="${row.id}" data-raw-content="${escAttr(row.content || '')}">${escHtml(row.content || '')}</span></p>`).join('')}
       </section>`).join('')}`;
   }).catch(() => {
     if (status) status.textContent = 'Could not load pamphlet';
@@ -363,7 +396,7 @@ function loadPageSummary() {
       // Other references / sources
       if (data.sources && data.sources.length) {
         data.sources.forEach(s => {
-          const ref = s.url ? `<p class="mb-1">${escHtml(s.url)}</p>` : '';
+          const ref = renderSourceReferences(s.urls || (s.url ? [s.url] : []));
           const loc = s.page || s.paragraph || s.verse
             ? `<div class="text-muted small mb-1">p. ${escHtml(s.page || '')} · ¶${s.paragraph || ''} · v${s.verse || s.line || ''}</div>`
             : '';
@@ -677,7 +710,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('srcPara', source.paragraph || '');
     setValue('srcVerse', source.verse || source.line || '');
     setValue('srcAuthor', source.author || '');
-    setValue('srcUrl', source.url || '');
+    setSourceUrlFields(source.urls || (source.url ? [source.url] : ['']));
     setValue('srcNotes', source.notes || '');
     setValue('srcRank', source.rank || '');
     showTab('#tabSrc');
@@ -698,6 +731,10 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function escAttr(str) {
+  return escHtml(str).replace(/'/g, '&#39;');
 }
 
 function makeTextSnippet(value, query = '') {
@@ -757,7 +794,7 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('dblclick', e => {
-  const fragment = e.target.closest('.verse-fragment');
+  const fragment = e.target.closest('.verse-fragment, .secondary-book-fragment, .pamphlet-fragment');
   if (!fragment) return;
   e.preventDefault();
   e.stopPropagation();
@@ -1010,7 +1047,7 @@ function editFragment(fragment) {
   };
   const render = value => {
     fragment.dataset.rawContent = value;
-    fragment.textContent = displayFragmentText(value);
+    fragment.textContent = displayFragmentText(value, fragmentDisplayMode(fragment));
   };
   const cancel = () => {
     if (finished) return;
@@ -1033,7 +1070,7 @@ function editFragment(fragment) {
       return;
     }
     render(next);
-    const res = await fetch(`/api/book-content/${fragment.dataset.contentId}`, {
+    const res = await fetch(fragmentUpdateUrl(fragment), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: next }),
@@ -1059,11 +1096,26 @@ function editFragment(fragment) {
   fragment.addEventListener('keydown', onKeydown);
 }
 
-function displayFragmentText(value) {
-  if (typeof CONTENT_MODE !== 'undefined' && CONTENT_MODE === 'sentence' && value.endsWith('-')) {
+function displayFragmentText(value, mode = CONTENT_MODE) {
+  if (mode === 'paragraph') {
+    return value;
+  }
+  if (mode === 'sentence' && value.endsWith('-')) {
     return value.slice(0, -1);
   }
   return `${value} `;
+}
+
+function fragmentUpdateUrl(fragment) {
+  if (fragment.classList.contains('pamphlet-fragment')) {
+    return `/api/pamphlet-content/${fragment.dataset.pamphletContentId}`;
+  }
+  return `/api/book-content/${fragment.dataset.contentId}`;
+}
+
+function fragmentDisplayMode(fragment) {
+  if (fragment.classList.contains('pamphlet-fragment')) return 'paragraph';
+  return fragment.dataset.contentMode || CONTENT_MODE;
 }
 
 function setValue(id, value) {
@@ -1103,6 +1155,7 @@ function resetSourceForm() {
   currentSourceEditId = null;
   setValue('srcId', '');
   if (CURRENT_PAGE) setValue('srcPage', CURRENT_PAGE);
+  setSourceUrlFields(['']);
 }
 
 function combineVerseText(parts) {
@@ -1495,7 +1548,7 @@ document.getElementById('srcForm').addEventListener('submit', async function (e)
     name,
     source_type: document.getElementById('srcType').value,
     author: document.getElementById('srcAuthor').value.trim(),
-    url: document.getElementById('srcUrl').value.trim(),
+    urls: sourceReferenceValues(),
     notes: document.getElementById('srcNotes').value.trim(),
     rank: parseInt(document.getElementById('srcRank').value) || null,
   };
@@ -1511,6 +1564,45 @@ document.getElementById('srcForm').addEventListener('submit', async function (e)
   resetSourceForm();
   loadPageSummary();
 });
+
+function setSourceUrlFields(urls = ['']) {
+  const container = document.getElementById('srcUrlsContainer');
+  if (!container) return;
+  container.innerHTML = '';
+  const values = urls.length ? urls : [''];
+  values.forEach(url => addSourceUrlField(url));
+}
+
+function addSourceUrlField(value = '') {
+  const container = document.getElementById('srcUrlsContainer');
+  if (!container) return;
+  const row = document.createElement('div');
+  row.className = 'input-group input-group-sm source-url-field';
+  row.innerHTML = `
+    <input type="text" class="form-control source-url-input" value="${escAttr(value)}">
+    <button class="btn btn-outline-secondary" type="button" aria-label="Remove reference">
+      <i class="bi bi-x-lg"></i>
+    </button>`;
+  row.querySelector('button').addEventListener('click', () => {
+    row.remove();
+    if (!container.querySelector('.source-url-input')) addSourceUrlField();
+  });
+  container.appendChild(row);
+}
+
+function sourceReferenceValues() {
+  return [...document.querySelectorAll('#srcUrlsContainer .source-url-input')]
+    .map(input => input.value.trim())
+    .filter(Boolean);
+}
+
+function renderSourceReferences(urls = []) {
+  const values = urls.map(url => String(url || '').trim()).filter(Boolean);
+  if (!values.length) return '';
+  return `<div class="source-reference-list mb-1">${values.map(url => (
+    `<div class="source-reference-line">${escHtml(url)}</div>`
+  )).join('')}</div>`;
+}
 
 /* ── Split selected text ───────────────────────────────────────────────────── */
 
@@ -1593,6 +1685,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   loadPageFormat();
   loadPageSummary();
+  loadPamphletOptions();
+  setSourceUrlFields(['']);
   Promise.resolve(loadTopicOptions()).then(() => {
     setTopicEditMode(false);
     restoreTopicDraft();

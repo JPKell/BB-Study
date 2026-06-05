@@ -165,6 +165,27 @@ def _sync_sqlite_schema():
     if 'verse' in source_columns or 'line' in source_columns:
         db.session.execute(text('UPDATE sources SET verse = line WHERE verse IS NULL AND line IS NOT NULL'))
         db.session.commit()
+    db.session.execute(text(
+        'CREATE TABLE IF NOT EXISTS source_urls ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'source_id INTEGER NOT NULL, '
+        'url VARCHAR(1000) NOT NULL, '
+        'label VARCHAR(300), '
+        'sort_order INTEGER NOT NULL DEFAULT 0, '
+        'created_at DATETIME, '
+        'FOREIGN KEY(source_id) REFERENCES sources(id)'
+        ')'
+    ))
+    db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_source_urls_source_id ON source_urls(source_id)'))
+    db.session.execute(text(
+        'INSERT INTO source_urls (source_id, url, sort_order, created_at) '
+        'SELECT s.id, s.url, 0, s.created_at FROM sources s '
+        'WHERE s.url IS NOT NULL AND s.url != "" '
+        'AND NOT EXISTS ('
+        'SELECT 1 FROM source_urls su WHERE su.source_id = s.id AND su.url = s.url'
+        ')'
+    ))
+    db.session.commit()
 
     commentary_columns = {col['name'] for col in inspector.get_columns('commentary')}
     if 'verse' not in commentary_columns:

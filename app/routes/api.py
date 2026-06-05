@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, BookLocation,
                       DictionaryLookup, BookReference, BookContent, BookContentFormat,
                       BookPageFormat, BookTableOfContents, ContentTopic, Commentary, Source,
-                      Topic)
+                      SourceUrl, Topic)
 from ..page_numbers import populate_book_relative_page_numbers
 from .. import db
 
@@ -103,6 +103,29 @@ def _parse_rank(value):
     except (TypeError, ValueError):
         return None
     return max(1, rank)
+
+
+def _source_url_values(data):
+    urls = data.get('urls')
+    if urls is None:
+        urls = [data.get('url')]
+    cleaned = []
+    seen = set()
+    for value in urls or []:
+        url = str(value or '').strip()
+        if not url or url in seen:
+            continue
+        cleaned.append(url)
+        seen.add(url)
+    return cleaned
+
+
+def _sync_source_urls(source, urls):
+    source.url = urls[0] if urls else None
+    source.urls[:] = [
+        SourceUrl(url=url, sort_order=index)
+        for index, url in enumerate(urls)
+    ]
 
 
 def _apply_rank(row, scope_query, requested_rank=None):
@@ -337,6 +360,16 @@ def list_pamphlet_content(pid):
     rows.sort(key=lambda row: (_page_sort_key(row.page), row.paragraph or 0,
                                row.line or 0, row.id))
     return jsonify([row.to_dict() for row in rows])
+
+
+@api_bp.route('/pamphlet-content/<int:cid>', methods=['PUT'])
+def update_pamphlet_content(cid):
+    row = PamphletContent.query.get_or_404(cid)
+    data = request.get_json(force=True) or {}
+    if 'content' in data:
+        row.content = data['content']
+    db.session.commit()
+    return _ok(row.to_dict())
 
 
 @api_bp.route('/pamphlets/search', methods=['GET'])
@@ -1467,6 +1500,7 @@ def create_source():
     data = request.get_json(force=True) or {}
     if not data.get('name'):
         return _err('name is required')
+    urls = _source_url_values(data)
     s = Source(
         book_id=data.get('book_id'),
         page=data.get('page'),
@@ -1475,12 +1509,13 @@ def create_source():
         verse=data.get('verse', data.get('line')),
         name=data['name'],
         source_type=data.get('source_type', 'other'),
-        url=data.get('url'),
+        url=urls[0] if urls else None,
         author=data.get('author'),
         publication=data.get('publication'),
         publish_date=data.get('publish_date'),
         notes=data.get('notes'),
     )
+    _sync_source_urls(s, urls)
     db.session.add(s)
     db.session.flush()
     if s.book_id and s.page:
@@ -1503,6 +1538,8 @@ def update_source(sid):
                   'name', 'source_type', 'url', 'author', 'publication', 'publish_date', 'notes', 'rank'):
         if field in data and field != 'rank':
             setattr(s, field_aliases.get(field, field), data[field])
+    if 'urls' in data or 'url' in data:
+        _sync_source_urls(s, _source_url_values(data))
     if s.book_id and s.page and ('rank' in data or s.rank is None):
         _apply_rank(s, _page_annotation_rank_scope(s.book_id, s.page), data.get('rank'))
     db.session.commit()

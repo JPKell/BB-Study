@@ -545,9 +545,11 @@ def prune_side_definitions(data, layout, y):
                             char_spacing=layout.definition_kerning,
                             color=grayscale_color(layout.definition_gray))
     available = max(0, y - layout.bottom_margin)
-    kept = sort_ranked_items(data.definitions)
-    while kept and measure_labeled_items(format_definitions(sort_definitions_alpha(kept)), side_width, style, title_style) > available:
-        kept.pop()
+    kept = []
+    for definition in sort_ranked_items(data.definitions):
+        trial = kept + [definition]
+        if measure_labeled_items(format_definitions(sort_definitions_alpha(trial)), side_width, style, title_style) <= available:
+            kept = trial
     return kept
 
 
@@ -555,9 +557,12 @@ def prune_bottom_annotations(data, layout, y):
     pool = annotation_prune_pool(data, layout)
     if not pool:
         return
-    kept = set(pool)
-    while kept and not annotation_pool_fits(data, layout, y, kept):
-        kept.remove(max(kept, key=annotation_candidate_drop_key))
+    kept = set()
+    for candidate in sorted(pool, key=annotation_candidate_drop_key):
+        trial = set(kept)
+        trial.add(candidate)
+        if annotation_pool_fits(data, layout, y, trial):
+            kept = trial
     data.commentary_rows = [row for row in data.commentary_rows if annotation_candidate('commentary', row) in kept]
     data.references = [row for row in data.references if annotation_candidate('reference', row) in kept]
     data.sources = [row for row in data.sources if annotation_candidate('source', row) in kept]
@@ -674,17 +679,23 @@ def split_wide_annotation_items(items, column_width, style):
     column_items = []
     wide_items = []
     for item in items:
-        if source_url_for_item(item):
+        references = source_references_for_item(item)
+        if references:
             column_items.append(source_column_item(item))
-            wide_items.append(source_url_item(item))
+            wide_items.extend(
+                source_url_item(item, reference, include_marker=index == 0)
+                for index, reference in enumerate(references)
+            )
             continue
         column_items.append(item)
     return column_items, wide_items
 
 
-def source_url_for_item(item):
+def source_references_for_item(item):
     row = item.get('row')
-    return getattr(row, 'url', None) if item.get('kind') == 'source' else None
+    if item.get('kind') != 'source' or not row:
+        return []
+    return source_reference_values(row)
 
 
 def source_column_item(item):
@@ -693,11 +704,11 @@ def source_column_item(item):
     return clone
 
 
-def source_url_item(item):
+def source_url_item(item, reference, include_marker=False):
     return {
         'kind': 'source-url',
-        'marker': item.get('marker'),
-        'text': source_url_for_item(item),
+        'marker': item.get('marker') if include_marker else None,
+        'text': reference,
         'row': item.get('row'),
     }
 
@@ -706,8 +717,12 @@ def measure_wide_annotation_items_height(items, width, style, label_style):
     height = 0
     for item in items:
         height += measure_wide_annotation_item_height(item, width, style, label_style)
-        height += 0.08 * inch
+        height += wide_annotation_item_gap()
     return height
+
+
+def wide_annotation_item_gap():
+    return 0.02 * inch
 
 
 def measure_wide_annotation_item_height(item, width, style, label_style):
@@ -901,7 +916,11 @@ def draw_commentary_columns(pdf, data, layout, y):
 def annotation_column_bottom_limit(layout, wide_height):
     if wide_height <= 0:
         return layout.bottom_margin
-    return footer_url_block_bottom_y(layout) + wide_height + 0.06 * inch
+    return footer_url_block_bottom_y(layout) + wide_height + footer_url_block_top_gap()
+
+
+def footer_url_block_top_gap():
+    return 0.14 * inch
 
 
 def footer_url_block_bottom_y(layout):
@@ -923,7 +942,7 @@ def draw_wide_annotation_items(pdf, items, x, y, width, style, marker_style, lay
             pdf, item.get('marker'), item.get('text') or '', x, y, width,
             style, marker_style,
         )
-        y -= 0.08 * inch
+        y -= wide_annotation_item_gap()
     return y
 
 
@@ -1076,17 +1095,29 @@ def format_sources(rows):
 
 def format_source(row, include_url=True):
     bits = [row.name or 'Source']
-    if row.source_type:
-        bits.append(row.source_type)
     if row.author:
         bits.append(f'by {row.author}')
     if row.publication:
         bits.append(row.publication)
-    if include_url and row.url:
-        bits.append(row.url)
+    if include_url:
+        bits.extend(source_reference_values(row))
     if row.notes:
         bits.append(row.notes)
     return ' - '.join(bits)
+
+
+def source_reference_values(row):
+    values = []
+    seen = set()
+    for entry in sorted(getattr(row, 'urls', []) or [], key=lambda item: (item.sort_order or 0, item.id or 0)):
+        reference = (entry.url or '').strip()
+        if reference and reference not in seen:
+            values.append(reference)
+            seen.add(reference)
+    legacy_url = (getattr(row, 'url', None) or '').strip()
+    if legacy_url and legacy_url not in seen:
+        values.insert(0, legacy_url)
+    return values
 
 
 def make_location(chapter, page, paragraph, verse):

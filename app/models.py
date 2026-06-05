@@ -502,8 +502,15 @@ class Source(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     book = db.relationship('Book', backref=db.backref('sources', lazy=True))
+    urls = db.relationship('SourceUrl', backref='source', lazy=True,
+                           cascade='all, delete-orphan')
 
     def to_dict(self):
+        url_rows = [row.to_dict() for row in sorted(self.urls, key=lambda row: (row.sort_order or 0, row.id or 0))]
+        url_values = [row['url'] for row in url_rows]
+        if self.url and self.url not in url_values:
+            url_rows.insert(0, {'id': None, 'source_id': self.id, 'url': self.url, 'label': None, 'sort_order': 0})
+            url_values.insert(0, self.url)
         return {
             'id': self.id,
             'book_id': self.book_id,
@@ -516,10 +523,33 @@ class Source(db.Model):
             'name': self.name,
             'source_type': self.source_type,
             'url': self.url,
+            'urls': url_values,
+            'url_entries': url_rows,
             'author': self.author,
             'publication': self.publication,
             'publish_date': self.publish_date,
             'notes': self.notes,
             'rank': self.rank,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class SourceUrl(db.Model):
+    """Additional URLs attached to an Other Reference source."""
+    __tablename__ = 'source_urls'
+    id = db.Column(db.Integer, primary_key=True)
+    source_id = db.Column(db.Integer, db.ForeignKey('sources.id'), nullable=False, index=True)
+    url = db.Column(db.String(1000), nullable=False)
+    label = db.Column(db.String(300))
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'source_id': self.source_id,
+            'url': self.url,
+            'label': self.label,
+            'sort_order': self.sort_order,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
