@@ -659,20 +659,97 @@ def measure_commentary_columns_height(items, layout, y):
 
 
 def measure_column_annotation_items_height(items, column_width, column_count, available, style, label_style):
-    column_index = 0
-    current_height = 0
-    used_height = 0
+    columns, fits = allocate_annotation_columns(
+        items, column_width, column_count, available, style, label_style,
+    )
+    if not fits:
+        return available + 1, False
+    return max((column['height'] for column in columns), default=0), True
+
+
+def allocate_annotation_columns(items, column_width, column_count, available, style, label_style):
+    column_count = max(1, int(column_count or 1))
+    item_entries = []
     for item in items:
-        item_height = measure_commentary_item_height(item, column_width, style, label_style)
-        item_height += 0.12 * inch
-        if current_height and current_height + item_height > available:
-            column_index += 1
-            current_height = 0
-        if column_index >= column_count or item_height > available:
-            return available + 1, False
-        current_height += item_height
-        used_height = max(used_height, current_height)
-    return used_height, True
+        height = measure_commentary_item_height(item, column_width, style, label_style)
+        height += annotation_column_item_gap()
+        if height > available:
+            return [], False
+        item_entries.append({'item': item, 'height': height})
+
+    columns = [{'items': [], 'height': 0} for _ in range(column_count)]
+    if not item_entries:
+        return columns, True
+
+    active_columns = min(column_count, len(item_entries))
+    partitioned_columns = partition_annotation_items(item_entries, active_columns)
+    columns[:active_columns] = partitioned_columns
+    if any(column['height'] > available for column in columns):
+        return [], False
+    return columns, True
+
+
+def partition_annotation_items(item_entries, column_count):
+    prefix_heights = [0]
+    for entry in item_entries:
+        prefix_heights.append(prefix_heights[-1] + entry['height'])
+
+    best_breaks = None
+    best_score = None
+    for breaks in annotation_column_breaks(len(item_entries), column_count):
+        heights = partition_heights(prefix_heights, breaks)
+        score = annotation_partition_score(heights, breaks)
+        if best_score is None or score < best_score:
+            best_breaks = breaks
+            best_score = score
+
+    columns = []
+    start = 0
+    for end in best_breaks:
+        height = prefix_heights[end] - prefix_heights[start]
+        columns.append({
+            'items': [entry['item'] for entry in item_entries[start:end]],
+            'height': height,
+        })
+        start = end
+    return columns
+
+
+def annotation_column_breaks(item_count, column_count, start=0):
+    if column_count == 1:
+        yield [item_count]
+        return
+    end_limit = item_count - column_count + 1
+    for end in range(start + 1, end_limit + 1):
+        for breaks in annotation_column_breaks(item_count, column_count - 1, end):
+            yield [end, *breaks]
+
+
+def partition_heights(prefix_heights, breaks):
+    heights = []
+    start = 0
+    for end in breaks:
+        heights.append(prefix_heights[end] - prefix_heights[start])
+        start = end
+    return heights
+
+
+def annotation_partition_score(heights, breaks):
+    right_heavy = sum(max(0, heights[index] - heights[index - 1]) for index in range(1, len(heights)))
+    height_range = max(heights) - min(heights)
+    max_height = max(heights)
+    item_counts = [breaks[0], *(breaks[index] - breaks[index - 1] for index in range(1, len(breaks)))]
+    return (
+        height_range + (right_heavy * 2),
+        right_heavy,
+        height_range,
+        max_height,
+        tuple(-count for count in item_counts[:-1]),
+    )
+
+
+def annotation_column_item_gap():
+    return 0.12 * inch
 
 
 def split_wide_annotation_items(items, column_width, style):
@@ -728,8 +805,7 @@ def wide_annotation_item_gap():
 def measure_wide_annotation_item_height(item, width, style, label_style):
     marker_width = measure_marker_width(item.get('marker'), style)
     first_line_width = width - marker_width if item.get('marker') else width
-    return len(wrap_text(item.get('text') or '', first_line_width, style.font,
-                         style.size, style.char_spacing)) * style.leading
+    return len(wrap_marker_text(item.get('text') or '', first_line_width, width, style)) * style.leading
 
 
 def measure_commentary_item_height(item, width, style, label_style):
@@ -740,17 +816,15 @@ def measure_commentary_item_height(item, width, style, label_style):
         label_width = measure_string(label_text, label_style.bold_font, style.size, label_style.char_spacing)
         if label_text and label_width < width * 0.75:
             first_width = max(1, width - label_width)
-            lines = wrap_text(body, first_width, style.font, style.size, style.char_spacing)
-            remaining = wrap_text(' '.join(lines[1:]), width, style.font, style.size,
-                                  style.char_spacing) if len(lines) > 1 else []
+            lines = wrap_annotation_text(body, first_width, style.font, style.size, style.char_spacing)
+            remaining = rewrap_annotation_lines(lines[1:], width, style) if len(lines) > 1 else []
             return (1 + len(remaining)) * style.leading
         label_lines = 1 if label_text else 0
-        body_lines = len(wrap_text(body, width, style.font, style.size, style.char_spacing))
+        body_lines = len(wrap_annotation_text(body, width, style.font, style.size, style.char_spacing))
         return (label_lines + body_lines) * style.leading
     marker_width = measure_marker_width(item.get('marker'), style)
     first_line_width = width - marker_width if item.get('marker') else width
-    return len(wrap_text(item.get('text') or '', first_line_width, style.font,
-                         style.size, style.char_spacing)) * style.leading
+    return len(wrap_marker_text(item.get('text') or '', first_line_width, width, style)) * style.leading
 
 
 def measure_section_heading_height(layout):
@@ -883,29 +957,31 @@ def draw_commentary_columns(pdf, data, layout, y):
     column_items, wide_items = split_wide_annotation_items(items, column_width, style)
     wide_height = measure_wide_annotation_items_height(wide_items, width, style, marker_style)
     data.annotation_column_bottom_y = annotation_column_bottom_limit(layout, wide_height)
-    column_height, _ = measure_column_annotation_items_height(
+    allocated_columns, _ = allocate_annotation_columns(
         column_items, column_width, column_count,
         max(0, y - data.annotation_column_bottom_y),
         style, marker_style,
     )
-    columns = [{'x': left + ((column_width + gap) * i)} for i in range(column_count)]
-    column_index = 0
-
-    for item in column_items:
-        if item['kind'] == 'definition':
-            y, column_index, columns = draw_definition_flow_item(
-                pdf, item['label'], item['text'], columns, column_index, y, column_width,
-                style, marker_style, layout, data,
-            )
-        else:
-            y, column_index, columns = draw_marker_flow_item(
-                pdf, item['marker'], item['text'], columns, column_index, y, column_width,
-                style, marker_style, layout, data,
-                layout.commentary_alignment if item['kind'] == 'commentary' else layout.annotation_alignment,
-            )
-        y -= 0.12 * inch
-        if y < layout.bottom_margin:
-            y, column_index, columns = advance_annotation_column(pdf, layout, data, columns, column_index)
+    column_bottoms = []
+    for column_index, column in enumerate(allocated_columns):
+        column_y = y
+        column_x = left + ((column_width + gap) * column_index)
+        flow_column = [{'x': column_x}]
+        for item in column['items']:
+            if item['kind'] == 'definition':
+                column_y, _, _ = draw_definition_flow_item(
+                    pdf, item['label'], item['text'], flow_column, 0, column_y, column_width,
+                    style, marker_style, layout, data,
+                )
+            else:
+                column_y, _, _ = draw_marker_flow_item(
+                    pdf, item['marker'], item['text'], flow_column, 0, column_y, column_width,
+                    style, marker_style, layout, data,
+                    layout.commentary_alignment if item['kind'] == 'commentary' else layout.annotation_alignment,
+                )
+            column_y -= annotation_column_item_gap()
+        column_bottoms.append(column_y)
+    y = min(column_bottoms, default=y)
     if wide_items:
         y = min(y, draw_wide_annotation_items_at_footer(pdf, wide_items, left, width, style, marker_style, layout))
     if hasattr(data, 'annotation_column_bottom_y'):
@@ -949,7 +1025,7 @@ def draw_wide_annotation_items(pdf, items, x, y, width, style, marker_style, lay
 def draw_wide_marker_item(pdf, marker, text, x, y, width, style, marker_style):
     marker_width = measure_marker_width(marker, style)
     first_line_width = width - marker_width if marker else width
-    lines = wrap_text(text, first_line_width, style.font, style.size, style.char_spacing)
+    lines = wrap_marker_text(text, first_line_width, width, style)
     for index, line in enumerate(lines):
         line_x = x
         line_width = width
@@ -980,7 +1056,7 @@ def draw_marker_flow_item(pdf, marker, text, columns, column_index, y, width, st
                           alignment='left'):
     marker_width = measure_marker_width(marker, style)
     first_line_width = width - marker_width if marker else width
-    lines = wrap_text(text, first_line_width, style.font, style.size, style.char_spacing)
+    lines = wrap_marker_text(text, first_line_width, width, style)
     marker_pending = bool(marker)
 
     for index, line in enumerate(lines):
@@ -1008,7 +1084,7 @@ def draw_definition_flow_item(pdf, label, text, columns, column_index, y, width,
 
     if label_text and label_width < width * 0.75:
         first_width = max(1, width - label_width)
-        lines = wrap_text(body, first_width, style.font, style.size, style.char_spacing)
+        lines = wrap_annotation_text(body, first_width, style.font, style.size, style.char_spacing)
         if not lines:
             lines = ['']
         y, column_index, columns = ensure_annotation_line_space(pdf, layout, data, columns, column_index, y)
@@ -1016,9 +1092,9 @@ def draw_definition_flow_item(pdf, label, text, columns, column_index, y, width,
         draw_text(pdf, line_x, y, label_text, label_style.bold_font, style.size, style.color, label_style.char_spacing)
         draw_aligned_plain_line(pdf, lines[0], line_x + label_width, y, first_width, style, 'left')
         y -= style.leading
-        remaining_lines = wrap_text(' '.join(lines[1:]), width, style.font, style.size, style.char_spacing) if len(lines) > 1 else []
+        remaining_lines = rewrap_annotation_lines(lines[1:], width, style) if len(lines) > 1 else []
     else:
-        remaining_lines = wrap_text(body, width, style.font, style.size, style.char_spacing)
+        remaining_lines = wrap_annotation_text(body, width, style.font, style.size, style.char_spacing)
         if label_text:
             y, column_index, columns = ensure_annotation_line_space(pdf, layout, data, columns, column_index, y)
             draw_text(pdf, columns[column_index]['x'], y, label, label_style.bold_font, style.size, style.color,
@@ -1732,6 +1808,59 @@ def wrap_text(text, width, font, size, char_spacing=0):
     for word in words:
         candidate = word if not current else f'{current} {word}'
         if measure_string(candidate, font, size, char_spacing) <= width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def wrap_annotation_text(text, width, font, size, char_spacing=0):
+    wrapped = []
+    for segment in annotation_text_lines(text):
+        if segment == '':
+            wrapped.append('')
+        else:
+            wrapped.extend(wrap_text(segment, width, font, size, char_spacing))
+    return wrapped or ['']
+
+
+def rewrap_annotation_lines(lines, width, style):
+    return wrap_annotation_text('\n'.join(lines), width, style.font, style.size, style.char_spacing)
+
+
+def wrap_marker_text(text, first_width, full_width, style):
+    wrapped = []
+    first_line = True
+    for segment in annotation_text_lines(text):
+        if segment == '':
+            wrapped.append('')
+            first_line = False
+            continue
+        lines = wrap_text_with_first_width(segment, first_width if first_line else full_width,
+                                           full_width, style)
+        wrapped.extend(lines)
+        first_line = False
+    return wrapped or ['']
+
+
+def annotation_text_lines(text):
+    return str(text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
+
+
+def wrap_text_with_first_width(text, first_width, full_width, style):
+    words = str(text or '').split()
+    if not words:
+        return ['']
+    lines = []
+    current = ''
+    for word in words:
+        limit = first_width if not lines else full_width
+        candidate = word if not current else f'{current} {word}'
+        if measure_string(candidate, style.font, style.size, style.char_spacing) <= limit:
             current = candidate
             continue
         if current:
