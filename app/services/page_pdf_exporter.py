@@ -673,8 +673,6 @@ def allocate_annotation_columns(items, column_width, column_count, available, st
     for item in items:
         height = measure_commentary_item_height(item, column_width, style, label_style)
         height += annotation_column_item_gap()
-        if height > available:
-            return [], False
         item_entries.append({'item': item, 'height': height})
 
     columns = [{'items': [], 'height': 0} for _ in range(column_count)]
@@ -682,11 +680,85 @@ def allocate_annotation_columns(items, column_width, column_count, available, st
         return columns, True
 
     active_columns = min(column_count, len(item_entries))
-    partitioned_columns = partition_annotation_items(item_entries, active_columns)
-    columns[:active_columns] = partitioned_columns
-    if any(column['height'] > available for column in columns):
+    if all(entry['height'] <= available for entry in item_entries):
+        partitioned_columns = partition_annotation_items(item_entries, active_columns)
+        columns[:active_columns] = partitioned_columns
+        if not any(column['height'] > available for column in columns):
+            return columns, True
+
+    flow_columns, fits = allocate_flowing_annotation_columns(
+        items, column_width, column_count, available, style, label_style,
+    )
+    if not fits:
         return [], False
+    columns[:len(flow_columns)] = flow_columns
     return columns, True
+
+
+def allocate_flowing_annotation_columns(items, column_width, column_count, available, style, label_style):
+    if available < style.leading:
+        return [], False
+
+    column_heights = flowing_annotation_column_heights(
+        items, column_width, column_count, available, style, label_style, prefer_clean_item_starts=True,
+    )
+    if column_heights is None:
+        column_heights = flowing_annotation_column_heights(
+            items, column_width, column_count, available, style, label_style, prefer_clean_item_starts=False,
+        )
+    if column_heights is None:
+        return [], False
+    columns = [{'items': [], 'height': height, 'flow': True} for height in column_heights]
+    if columns:
+        columns[0]['items'] = items
+    return columns, True
+
+
+def flowing_annotation_column_heights(items, column_width, column_count, available, style, label_style,
+                                      prefer_clean_item_starts=False):
+    column_index = 0
+    column_heights = [0 for _ in range(column_count)]
+    remaining = available
+    previous_item_spilled = False
+    for item in items:
+        line_heights = annotation_item_line_heights(item, column_width, style, label_style)
+        item_height = sum(line_heights) + annotation_column_item_gap()
+        if (
+            prefer_clean_item_starts
+            and previous_item_spilled
+            and column_heights[column_index] > 0
+            and item_height <= available
+            and any(height == 0 for height in column_heights[column_index + 1:])
+        ):
+            column_index += 1
+            if column_index >= column_count:
+                return None
+            remaining = available
+        start_column = column_index
+        for line_height in line_heights:
+            if line_height > available:
+                return None
+            if remaining < line_height:
+                column_index += 1
+                if column_index >= column_count:
+                    return None
+                remaining = available
+            column_heights[column_index] += line_height
+            remaining -= line_height
+        gap = annotation_column_item_gap()
+        if remaining >= gap:
+            column_heights[column_index] += gap
+            remaining -= gap
+        else:
+            column_heights[column_index] = available
+            remaining = 0
+        previous_item_spilled = column_index > start_column
+    return column_heights
+
+
+def annotation_item_line_heights(item, width, style, label_style):
+    line_count = max(1, round(measure_commentary_item_height(item, width, style, label_style) / style.leading))
+    return [style.leading for _ in range(line_count)]
 
 
 def partition_annotation_items(item_entries, column_count):
@@ -962,31 +1034,87 @@ def draw_commentary_columns(pdf, data, layout, y):
         max(0, y - data.annotation_column_bottom_y),
         style, marker_style,
     )
-    column_bottoms = []
-    for column_index, column in enumerate(allocated_columns):
-        column_y = y
-        column_x = left + ((column_width + gap) * column_index)
-        flow_column = [{'x': column_x}]
-        for item in column['items']:
-            if item['kind'] == 'definition':
-                column_y, _, _ = draw_definition_flow_item(
-                    pdf, item['label'], item['text'], flow_column, 0, column_y, column_width,
-                    style, marker_style, layout, data,
-                )
-            else:
-                column_y, _, _ = draw_marker_flow_item(
-                    pdf, item['marker'], item['text'], flow_column, 0, column_y, column_width,
-                    style, marker_style, layout, data,
-                    layout.commentary_alignment if item['kind'] == 'commentary' else layout.annotation_alignment,
-                )
-            column_y -= annotation_column_item_gap()
-        column_bottoms.append(column_y)
+    if allocated_columns and allocated_columns[0].get('flow'):
+        column_bottoms = draw_flowing_annotation_columns(
+            pdf, allocated_columns[0]['items'], left, gap, y, column_width,
+            style, marker_style, layout, data,
+        )
+    else:
+        column_bottoms = []
+        for column_index, column in enumerate(allocated_columns):
+            column_y = y
+            column_x = left + ((column_width + gap) * column_index)
+            flow_column = [{'x': column_x}]
+            for item in column['items']:
+                if item['kind'] == 'definition':
+                    column_y, _, _ = draw_definition_flow_item(
+                        pdf, item['label'], item['text'], flow_column, 0, column_y, column_width,
+                        style, marker_style, layout, data,
+                    )
+                else:
+                    column_y, _, _ = draw_marker_flow_item(
+                        pdf, item['marker'], item['text'], flow_column, 0, column_y, column_width,
+                        style, marker_style, layout, data,
+                        layout.commentary_alignment if item['kind'] == 'commentary' else layout.annotation_alignment,
+                    )
+                column_y -= annotation_column_item_gap()
+            column_bottoms.append(column_y)
     y = min(column_bottoms, default=y)
     if wide_items:
         y = min(y, draw_wide_annotation_items_at_footer(pdf, wide_items, left, width, style, marker_style, layout))
     if hasattr(data, 'annotation_column_bottom_y'):
         delattr(data, 'annotation_column_bottom_y')
     return y
+
+
+def draw_flowing_annotation_columns(pdf, items, left, gap, y, column_width, style, marker_style, layout, data):
+    column_count = max(1, min(4, int(layout.commentary_columns or 3)))
+    columns = [
+        {'x': left + ((column_width + gap) * column_index)}
+        for column_index in range(column_count)
+    ]
+    column_y = y
+    column_index = 0
+    column_bottoms = [y for _ in columns]
+    prefer_clean_item_starts = flowing_annotation_column_heights(
+        items, column_width, column_count,
+        y - getattr(data, 'annotation_column_bottom_y', layout.bottom_margin),
+        style, marker_style, prefer_clean_item_starts=True,
+    ) is not None
+    previous_item_spilled = False
+    for item in items:
+        if prefer_clean_item_starts and should_start_annotation_item_in_next_column(
+            item, column_y, y, column_width, style, marker_style, layout, data, column_index, column_count,
+            previous_item_spilled,
+        ):
+            column_y, column_index, columns = advance_annotation_column(pdf, layout, data, columns, column_index)
+        start_column = column_index
+        if item['kind'] == 'definition':
+            column_y, column_index, _ = draw_definition_flow_item(
+                pdf, item['label'], item['text'], columns, column_index, column_y, column_width,
+                style, marker_style, layout, data,
+            )
+        else:
+            column_y, column_index, _ = draw_marker_flow_item(
+                pdf, item['marker'], item['text'], columns, column_index, column_y, column_width,
+                style, marker_style, layout, data,
+                layout.commentary_alignment if item['kind'] == 'commentary' else layout.annotation_alignment,
+            )
+        column_y -= annotation_column_item_gap()
+        for filled_index in range(column_index):
+            column_bottoms[filled_index] = getattr(data, 'annotation_column_bottom_y', layout.bottom_margin)
+        column_bottoms[column_index] = min(column_bottoms[column_index], column_y)
+        previous_item_spilled = column_index > start_column
+    return column_bottoms
+
+
+def should_start_annotation_item_in_next_column(item, y, top_y, column_width, style, label_style, layout, data,
+                                                column_index, column_count, previous_item_spilled=False):
+    if column_index >= column_count - 1 or y == top_y or not previous_item_spilled:
+        return False
+    bottom_y = getattr(data, 'annotation_column_bottom_y', layout.bottom_margin)
+    item_height = measure_commentary_item_height(item, column_width, style, label_style) + annotation_column_item_gap()
+    return item_height <= top_y - bottom_y
 
 
 def annotation_column_bottom_limit(layout, wide_height):
