@@ -482,6 +482,39 @@ class Commentary(db.Model):
         }
 
 
+class ReflectPrompt(db.Model):
+    """Reader-facing prompts for deeper consideration at a book location."""
+    __tablename__ = 'reflect_prompts'
+    id = db.Column(db.Integer, primary_key=True)
+    book_id = db.Column(db.Integer, db.ForeignKey('books.id'), nullable=False)
+    chapter = db.Column(db.String(100))
+    page = db.Column(db.String(20))
+    paragraph = db.Column(db.Integer)
+    verse = db.Column(db.Integer)
+    prompt_text = db.Column(db.Text, nullable=False)
+    rank = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    book = db.relationship('Book', backref=db.backref('reflect_prompts', lazy=True, cascade='all, delete-orphan'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'book_id': self.book_id,
+            'book_title': self.book.title if self.book else None,
+            'chapter': self.chapter,
+            'page': self.page,
+            'paragraph': self.paragraph,
+            'verse': self.verse,
+            'line': self.verse,
+            'prompt_text': self.prompt_text,
+            'rank': self.rank,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class Source(db.Model):
     """Non-book sources: speakers, websites, magazines, etc."""
     __tablename__ = 'sources'

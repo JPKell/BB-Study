@@ -11,6 +11,7 @@ const SECONDARY_PAGE = BB_STUDY_CONTEXT.secondaryPage || null;
 const SECONDARY_CONTENT_MODE = BB_STUDY_CONTEXT.secondaryContentMode || 'sentence';
 let currentRefEditId = null;
 let currentCommEditId = null;
+let currentReflectEditId = null;
 let currentTopicLinkEditId = null;
 let currentSourceEditId = null;
 let topicPickingEnd = false;
@@ -74,6 +75,7 @@ document.getElementById('verseItalicBtn')?.addEventListener('click', () => toggl
 document.getElementById('saveFormatBtn')?.addEventListener('click', () => saveSelectedVerseFormat());
 document.getElementById('pageCenteredExportSwitch')?.addEventListener('change', savePageFormat);
 document.getElementById('addSrcUrlBtn')?.addEventListener('click', () => addSourceUrlField());
+document.getElementById('saveReflectBtn')?.addEventListener('click', saveReflectPrompt);
 
 function loadPage() {
   const page = document.getElementById('pageInput').value.trim();
@@ -416,6 +418,24 @@ function loadPageSummary() {
         summaryCards.push(makeDictionarySummaryCard(data.dictionary));
       }
 
+      // Reflect prompts
+      if (data.reflect && data.reflect.length) {
+        data.reflect.forEach(prompt => {
+          const loc = makeLocationText([
+            ['Ch', prompt.chapter],
+            ['Page', prompt.page],
+            ['Para', prompt.paragraph],
+            ['Verse', prompt.verse || prompt.line],
+          ]);
+          summaryCards.push(makeSummaryCard('Reflect', 'commentary',
+            `${rankBadge(prompt.rank)}
+             <p class="mb-1">${escHtml(prompt.prompt_text)}</p>
+             ${loc ? `<small class="text-muted">${escHtml(loc)}</small>` : ''}`,
+            prompt.id, 'reflect-prompts', 'reflect', prompt.rank));
+          summaryCards[summaryCards.length - 1].dataset.sectionOrder = '20';
+        });
+      }
+
       // Topic tags linked to content on this page
       if (data.topics && data.topics.length) {
         data.topics.forEach(link => {
@@ -507,6 +527,7 @@ function makeDictionarySummaryCard(entries) {
         <small class="fw-semibold text-uppercase">Dictionary</small>
       </div>
       <div class="card-body py-2 px-2 small dictionary-summary-list">${rows}</div>`;
+  card.dataset.sectionOrder = '10';
   return card;
 }
 
@@ -520,8 +541,15 @@ function renderBalancedSummaryCards(summaryEl, cards) {
     return column;
   });
 
-  cards.sort((a, b) => summaryCardRank(a) - summaryCardRank(b));
-  measureSummaryCards(cards, columns[0]).forEach(({ card }) => {
+  const anchoredCards = cards
+    .filter(card => summaryCardSectionOrder(card) < 100)
+    .sort((a, b) => summaryCardSectionOrder(a) - summaryCardSectionOrder(b) || summaryCardRank(a) - summaryCardRank(b));
+  anchoredCards.forEach(card => columns[0].appendChild(card));
+
+  const balancedCards = cards
+    .filter(card => summaryCardSectionOrder(card) >= 100)
+    .sort((a, b) => summaryCardRank(a) - summaryCardRank(b));
+  measureSummaryCards(balancedCards, columns[0]).forEach(({ card }) => {
     const shortestColumn = columns.reduce((shortest, column) =>
       column.scrollHeight < shortest.scrollHeight ? column : shortest);
     shortestColumn.appendChild(card);
@@ -557,6 +585,10 @@ function summaryCardRank(card) {
     .filter(Boolean)
     .sort((a, b) => a - b)[0];
   return rowRank || Number.MAX_SAFE_INTEGER;
+}
+
+function summaryCardSectionOrder(card) {
+  return parseInt(card.dataset.sectionOrder) || 100;
 }
 
 function measureSummaryCards(cards, sampleColumn) {
@@ -647,6 +679,17 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('commText', data.commentary_text || '');
     setValue('commRank', data.rank || '');
     showTab('#tabComm');
+  } else if (type === 'reflect') {
+    const data = await fetch(`/api/reflect-prompts/${id}`).then(r => r.json());
+    currentReflectEditId = data.id;
+    setValue('reflectId', data.id);
+    setValue('reflectChapter', data.chapter || '');
+    setValue('reflectPage', data.page || CURRENT_PAGE || '');
+    setValue('reflectPara', data.paragraph || '');
+    setValue('reflectLine', data.verse || data.line || '');
+    setValue('reflectText', data.prompt_text || '');
+    setValue('reflectRank', data.rank || '');
+    showTab('#tabReflect');
   } else if (type === 'reference') {
     const data = await fetch(`/api/references/${id}`).then(r => r.json());
     currentRefEditId = data.id;
@@ -825,6 +868,10 @@ function selectVerse(fragment) {
   setValue('commPage', selection.page);
   setValue('commPara', selection.paragraph);
   setValue('commLine', selection.verse);
+  setValue('reflectChapter', selection.chapter);
+  setValue('reflectPage', selection.page);
+  setValue('reflectPara', selection.paragraph);
+  setValue('reflectLine', selection.verse);
   setValue('srcChapter', selection.chapter);
   setValue('srcPage', selection.page);
   setValue('srcPara', selection.paragraph);
@@ -1150,6 +1197,13 @@ function resetCommentaryForm() {
   if (CURRENT_PAGE) setValue('commPage', CURRENT_PAGE);
 }
 
+function resetReflectForm() {
+  document.getElementById('reflectForm')?.reset();
+  currentReflectEditId = null;
+  setValue('reflectId', '');
+  if (CURRENT_PAGE) setValue('reflectPage', CURRENT_PAGE);
+}
+
 function resetSourceForm() {
   document.getElementById('srcForm')?.reset();
   currentSourceEditId = null;
@@ -1342,6 +1396,40 @@ async function saveCommentary() {
   if (res.error) { showAlert(res.error, 'danger'); return; }
   showAlert(commId ? 'Commentary updated' : 'Commentary saved', 'success');
   resetCommentaryForm();
+  loadPageSummary();
+}
+
+document.getElementById('reflectForm')?.addEventListener('submit', async function (e) {
+  e.preventDefault();
+  saveReflectPrompt();
+});
+
+async function saveReflectPrompt() {
+  if (!CURRENT_BOOK_ID) { showAlert('Select a book first', 'warning'); return; }
+  const reflectIdField = document.getElementById('reflectId').value.trim();
+  const reflectId = currentReflectEditId || reflectIdField || null;
+  const text = document.getElementById('reflectText').value.trim();
+  if (!text) { showAlert('Reflect prompt is required', 'warning'); return; }
+
+  const payload = {
+    book_id: CURRENT_BOOK_ID,
+    chapter: document.getElementById('reflectChapter').value.trim(),
+    page: document.getElementById('reflectPage').value.trim() || CURRENT_PAGE,
+    paragraph: parseInt(document.getElementById('reflectPara').value) || null,
+    verse: parseInt(document.getElementById('reflectLine').value) || null,
+    prompt_text: text,
+    rank: parseInt(document.getElementById('reflectRank').value) || null,
+  };
+
+  const res = await fetch(reflectId ? `/api/reflect-prompts/${reflectId}` : '/api/reflect-prompts', {
+    method: reflectId ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(r => r.json()).catch(() => ({ error: 'Reflect prompt save failed' }));
+
+  if (res.error) { showAlert(res.error, 'danger'); return; }
+  showAlert(reflectId ? 'Reflect prompt updated' : 'Reflect prompt saved', 'success');
+  resetReflectForm();
   loadPageSummary();
 }
 
@@ -1678,7 +1766,7 @@ document.getElementById('saveContentBtn').addEventListener('click', async functi
 document.addEventListener('DOMContentLoaded', () => {
   updateVerseFormatButtons();
   if (CURRENT_PAGE) {
-    ['dictPage', 'refSrcPage', 'commPage', 'srcPage'].forEach(id => {
+    ['dictPage', 'refSrcPage', 'commPage', 'reflectPage', 'srcPage'].forEach(id => {
       const el = document.getElementById(id);
       if (el && !el.value) el.value = CURRENT_PAGE;
     });

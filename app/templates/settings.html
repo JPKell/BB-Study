@@ -99,6 +99,212 @@
 </div>
 {% endmacro %}
 
+{% macro typography_controls(label, prefix, size_key, font_key, gray_key, line_key, kerning_key, alignment_key='', bold_key='', italic_key='', all_caps_key='', extra_fields=()) %}
+<div class="export-font-subsection">
+  <div class="export-font-heading">{{ label }}</div>
+  <div class="export-font-controls">
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Font">Font</label>
+      <select class="form-select form-select-sm export-setting-input" id="{{ prefix }}Font" data-setting-key="{{ font_key }}">
+        <option value="Times-Roman" {% if export_settings[font_key] == 'Times-Roman' %}selected{% endif %}>Times</option>
+        <option value="Helvetica" {% if export_settings[font_key] == 'Helvetica' %}selected{% endif %}>Helvetica</option>
+        <option value="Courier" {% if export_settings[font_key] == 'Courier' %}selected{% endif %}>Courier</option>
+      </select>
+    </div>
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Size">Size</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control export-setting-input" id="{{ prefix }}Size" type="number" min="5" max="24" step="0.1"
+               data-setting-key="{{ size_key }}" value="{{ export_settings[size_key] }}">
+        <span class="input-group-text">pt</span>
+      </div>
+    </div>
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}LineSpacing">Line</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control export-setting-input" id="{{ prefix }}LineSpacing" type="number" min="0.8" max="2" step="0.05"
+               data-setting-key="{{ line_key }}" value="{{ export_settings[line_key] }}">
+        <span class="input-group-text">x</span>
+      </div>
+    </div>
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Kerning">Kerning</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control export-setting-input" id="{{ prefix }}Kerning" type="number" min="-1" max="2" step="0.05"
+               data-setting-key="{{ kerning_key }}" value="{{ export_settings[kerning_key] }}">
+        <span class="input-group-text">pt</span>
+      </div>
+    </div>
+    {% if alignment_key %}
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Alignment">Alignment</label>
+      <select class="form-select form-select-sm export-setting-input" id="{{ prefix }}Alignment" data-setting-key="{{ alignment_key }}">
+        <option value="left" {% if export_settings[alignment_key] == 'left' %}selected{% endif %}>Left</option>
+        <option value="center" {% if export_settings[alignment_key] == 'center' %}selected{% endif %}>Center</option>
+        <option value="right" {% if export_settings[alignment_key] == 'right' %}selected{% endif %}>Right</option>
+        <option value="justify" {% if export_settings[alignment_key] == 'justify' %}selected{% endif %}>Justified</option>
+      </select>
+    </div>
+    {% endif %}
+    <div class="export-font-control export-gray-control">
+      <div class="d-flex align-items-center justify-content-between gap-2">
+        <label class="form-label small fw-semibold" for="{{ prefix }}Gray">Gray</label>
+        <span class="small text-muted" id="{{ prefix }}GrayValue">{{ export_settings[gray_key] }}</span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="export-gray-swatch" data-gray-swatch="{{ prefix }}" style="--gray-level: {{ export_settings[gray_key] }}%;"></span>
+        <input class="form-range export-setting-input export-gray-input" id="{{ prefix }}Gray" type="range" min="0" max="90" step="1"
+               data-setting-key="{{ gray_key }}" data-gray-value="{{ prefix }}GrayValue" data-gray-swatch="{{ prefix }}"
+               value="{{ export_settings[gray_key] }}">
+      </div>
+    </div>
+    {% if bold_key or italic_key or all_caps_key %}
+    <div class="export-style-switches">
+      {% if bold_key %}
+      <div class="form-check form-switch mb-1">
+        <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+               id="{{ prefix }}Bold" data-setting-key="{{ bold_key }}" value="1"
+               {% if export_settings[bold_key] in ['1', 'true', 'on'] %}checked{% endif %}>
+        <label class="form-check-label small fw-semibold" for="{{ prefix }}Bold">Bold</label>
+      </div>
+      {% endif %}
+      {% if italic_key %}
+      <div class="form-check form-switch mb-1">
+        <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+               id="{{ prefix }}Italic" data-setting-key="{{ italic_key }}" value="1"
+               {% if export_settings[italic_key] in ['1', 'true', 'on'] %}checked{% endif %}>
+        <label class="form-check-label small fw-semibold" for="{{ prefix }}Italic">Italic</label>
+      </div>
+      {% endif %}
+      {% if all_caps_key %}
+      <div class="form-check form-switch mb-1">
+        <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+               id="{{ prefix }}AllCaps" data-setting-key="{{ all_caps_key }}" value="1"
+               {% if export_settings[all_caps_key] in ['1', 'true', 'on'] %}checked{% endif %}>
+        <label class="form-check-label small fw-semibold" for="{{ prefix }}AllCaps">All caps</label>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% for field in extra_fields %}
+    <div class="export-font-control export-extra-field">
+      <label class="form-label small fw-semibold" for="{{ field.id }}">{{ field.label }}</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control export-setting-input" id="{{ field.id }}" type="number"
+               min="{{ field.min }}" max="{{ field.max }}" step="{{ field.step }}"
+               data-setting-key="{{ field.key }}" value="{{ export_settings[field.key] }}">
+        {% if field.unit %}
+        <span class="input-group-text">{{ field.unit }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro paired_typography_section(title, prefix, body, header, extra_fields=()) %}
+<div class="tab-pane fade" id="{{ prefix }}TypographyPane" role="tabpanel">
+  <div class="export-font-row">
+    <div class="export-font-heading">{{ title }}</div>
+    {{ typography_controls('Text', prefix ~ 'Text', body.size, body.font, body.gray, body.line, body.kerning, body.alignment, body.bold, body.italic, body.all_caps) }}
+    {{ typography_controls('Header', prefix ~ 'Header', header.size, header.font, header.gray, header.line, header.kerning, header.alignment, header.bold, header.italic, header.all_caps, extra_fields) }}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro marker_typography_controls(label, prefix, settings) %}
+<div class="export-font-subsection">
+  <div class="export-font-heading">{{ label }}</div>
+  <div class="export-font-controls">
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Font">Font</label>
+      <select class="form-select form-select-sm export-setting-input" id="{{ prefix }}Font" data-setting-key="{{ settings.font }}">
+        <option value="Times-Roman" {% if export_settings[settings.font] == 'Times-Roman' %}selected{% endif %}>Times</option>
+        <option value="Helvetica" {% if export_settings[settings.font] == 'Helvetica' %}selected{% endif %}>Helvetica</option>
+        <option value="Courier" {% if export_settings[settings.font] == 'Courier' %}selected{% endif %}>Courier</option>
+      </select>
+    </div>
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Size">Size</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control export-setting-input" id="{{ prefix }}Size" type="number" min="4" max="14" step="0.1"
+               data-setting-key="{{ settings.size }}" value="{{ export_settings[settings.size] }}">
+        <span class="input-group-text">pt</span>
+      </div>
+    </div>
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Kerning">Kerning</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control export-setting-input" id="{{ prefix }}Kerning" type="number" min="-1" max="2" step="0.05"
+               data-setting-key="{{ settings.kerning }}" value="{{ export_settings[settings.kerning] }}">
+        <span class="input-group-text">pt</span>
+      </div>
+    </div>
+    <div class="export-font-control">
+      <label class="form-label small fw-semibold" for="{{ prefix }}Raise">Rise</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control export-setting-input" id="{{ prefix }}Raise" type="number" min="-2" max="10" step="0.25"
+               data-setting-key="{{ settings['raise'] }}" value="{{ export_settings[settings['raise']] }}">
+        <span class="input-group-text">pt</span>
+      </div>
+    </div>
+    <div class="export-font-control export-gray-control">
+      <div class="d-flex align-items-center justify-content-between gap-2">
+        <label class="form-label small fw-semibold" for="{{ prefix }}Gray">Gray</label>
+        <span class="small text-muted" id="{{ prefix }}GrayValue">{{ export_settings[settings.gray] }}</span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="export-gray-swatch" data-gray-swatch="{{ prefix }}" style="--gray-level: {{ export_settings[settings.gray] }}%;"></span>
+        <input class="form-range export-setting-input export-gray-input" id="{{ prefix }}Gray" type="range" min="0" max="90" step="1"
+               data-setting-key="{{ settings.gray }}" data-gray-value="{{ prefix }}GrayValue" data-gray-swatch="{{ prefix }}"
+               value="{{ export_settings[settings.gray] }}">
+      </div>
+    </div>
+    <div class="export-style-switches">
+      <div class="form-check form-switch mb-1">
+        <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+               id="{{ prefix }}Bold" data-setting-key="{{ settings.bold }}" value="1"
+               {% if export_settings[settings.bold] in ['1', 'true', 'on'] %}checked{% endif %}>
+        <label class="form-check-label small fw-semibold" for="{{ prefix }}Bold">Bold</label>
+      </div>
+      <div class="form-check form-switch mb-1">
+        <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+               id="{{ prefix }}Italic" data-setting-key="{{ settings.italic }}" value="1"
+               {% if export_settings[settings.italic] in ['1', 'true', 'on'] %}checked{% endif %}>
+        <label class="form-check-label small fw-semibold" for="{{ prefix }}Italic">Italic</label>
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro marker_typography_section() %}
+<div class="tab-pane fade" id="markersTypographyPane" role="tabpanel">
+  <div class="export-font-row">
+    <div class="export-font-heading">Markers</div>
+    {{ marker_typography_controls('Inline markers', 'inlineMarker', {
+      'size': 'export_inline_marker_font_size',
+      'font': 'export_inline_marker_font',
+      'gray': 'export_inline_marker_gray',
+      'kerning': 'export_inline_marker_kerning',
+      'raise': 'export_inline_marker_raise',
+      'bold': 'export_inline_marker_bold',
+      'italic': 'export_inline_marker_italic'
+    }) }}
+    {{ marker_typography_controls('Bottom footnote markers', 'footnoteMarker', {
+      'size': 'export_footnote_marker_font_size',
+      'font': 'export_footnote_marker_font',
+      'gray': 'export_footnote_marker_gray',
+      'kerning': 'export_footnote_marker_kerning',
+      'raise': 'export_footnote_marker_raise',
+      'bold': 'export_footnote_marker_bold',
+      'italic': 'export_footnote_marker_italic'
+    }) }}
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 <div class="export-settings-page">
   <h4 class="mb-4"><i class="bi bi-file-earmark-pdf me-1"></i>Export Settings</h4>
@@ -186,7 +392,9 @@
               {% for pane_id, label in [
                 ('bookText', 'Book'),
                 ('definitions', 'Definitions'),
+                ('reflect', 'Reflect'),
                 ('commentary', 'Commentary'),
+                ('markers', 'Markers'),
                 ('references', 'References'),
                 ('chapter', 'Page Header'),
                 ('pageNumber', 'Page No.'),
@@ -205,7 +413,34 @@
             </ul>
             <div class="export-font-list tab-content">
               {{ typography_section('Book Text', 'bookText', 'export_book_font_size', 'export_book_font', 'export_book_gray', 'export_book_line_spacing', 'export_book_kerning', 'export_book_alignment') }}
-              {{ typography_section('Definitions', 'definitions', 'export_definition_font_size', 'export_definition_font', 'export_definition_gray', 'export_definition_line_spacing', 'export_definition_kerning', 'export_definition_alignment') }}
+              {{ paired_typography_section('Definitions', 'definitions', {
+                'size': 'export_definition_font_size', 'font': 'export_definition_font', 'gray': 'export_definition_gray',
+                'line': 'export_definition_line_spacing', 'kerning': 'export_definition_kerning',
+                'alignment': 'export_definition_alignment', 'bold': 'export_definition_bold',
+                'italic': 'export_definition_italic', 'all_caps': 'export_definition_all_caps'
+              }, {
+                'size': 'export_definition_header_font_size', 'font': 'export_definition_header_font', 'gray': 'export_definition_header_gray',
+                'line': 'export_definition_header_line_spacing', 'kerning': 'export_definition_header_kerning',
+                'alignment': 'export_definition_header_alignment', 'bold': 'export_definition_header_bold',
+                'italic': 'export_definition_header_italic', 'all_caps': 'export_definition_header_all_caps'
+              }, extra_fields=[
+                {'id': 'exportDefinitionMarginAbove', 'label': 'Above', 'key': 'export_definition_margin_above', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportDefinitionMarginBelow', 'label': 'Below', 'key': 'export_definition_margin_below', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'}
+              ]) }}
+              {{ paired_typography_section('Reflect', 'reflect', {
+                'size': 'export_reflect_font_size', 'font': 'export_reflect_font', 'gray': 'export_reflect_gray',
+                'line': 'export_reflect_line_spacing', 'kerning': 'export_reflect_kerning',
+                'alignment': 'export_reflect_alignment', 'bold': 'export_reflect_bold',
+                'italic': 'export_reflect_italic', 'all_caps': 'export_reflect_all_caps'
+              }, {
+                'size': 'export_reflect_header_font_size', 'font': 'export_reflect_header_font', 'gray': 'export_reflect_header_gray',
+                'line': 'export_reflect_header_line_spacing', 'kerning': 'export_reflect_header_kerning',
+                'alignment': 'export_reflect_header_alignment', 'bold': 'export_reflect_header_bold',
+                'italic': 'export_reflect_header_italic', 'all_caps': 'export_reflect_header_all_caps'
+              }, extra_fields=[
+                {'id': 'exportReflectMarginAbove', 'label': 'Above', 'key': 'export_reflect_margin_above', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportReflectMarginBelow', 'label': 'Below', 'key': 'export_reflect_margin_below', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'}
+              ]) }}
               {{ typography_section('Commentary', 'commentary', 'export_commentary_font_size', 'export_commentary_font', 'export_commentary_gray', 'export_commentary_line_spacing', 'export_commentary_kerning', 'export_commentary_alignment', extra_fields=[
                 {'id': 'exportSectionGap', 'label': 'Main-to-rule gap', 'key': 'export_section_gap', 'min': '0', 'max': '1', 'step': '0.01', 'unit': 'in'},
                 {'id': 'exportRuleMarginAbove', 'label': 'Above rule', 'key': 'export_rule_margin_above', 'min': '0', 'max': '0.75', 'step': '0.01', 'unit': 'in'},
@@ -213,6 +448,7 @@
                 {'id': 'exportCommentaryColumns', 'label': 'Columns', 'key': 'export_commentary_columns', 'min': '1', 'max': '4', 'step': '1', 'unit': ''},
                 {'id': 'exportCommentaryColumnGutter', 'label': 'Column gutter', 'key': 'export_commentary_column_gutter', 'min': '0.05', 'max': '1', 'step': '0.01', 'unit': 'in'}
               ]) }}
+              {{ marker_typography_section() }}
               {{ typography_section('References', 'references', 'export_annotation_font_size', 'export_annotation_font', 'export_annotation_gray', 'export_annotation_line_spacing', 'export_annotation_kerning', 'export_annotation_alignment') }}
               {{ typography_section('Page Header', 'chapter', 'export_chapter_font_size', 'export_chapter_font', 'export_chapter_gray', 'export_chapter_line_spacing', 'export_chapter_kerning', bold_key='export_chapter_bold', italic_key='export_chapter_italic', extra_fields=[
                 {'id': 'exportMarginTop', 'label': 'Top margin', 'key': 'export_margin_top', 'min': '0.1', 'max': '2', 'step': '0.05', 'unit': 'in'},
@@ -222,10 +458,22 @@
                 {'id': 'exportMarginBottom', 'label': 'Bottom margin', 'key': 'export_margin_bottom', 'min': '0.1', 'max': '2', 'step': '0.05', 'unit': 'in'},
                 {'id': 'exportPageNumberGap', 'label': 'Above page number', 'key': 'export_page_number_gap', 'min': '0.1', 'max': '1.5', 'step': '0.05', 'unit': 'in'}
               ]) }}
-              {{ typography_section('Title', 'titleFormat', 'export_title_font_size', 'export_title_font', 'export_title_gray', 'export_title_line_spacing', 'export_title_kerning', 'export_title_alignment', 'export_title_bold', 'export_title_italic') }}
-              {{ typography_section('Subtitle', 'subtitleFormat', 'export_subtitle_font_size', 'export_subtitle_font', 'export_subtitle_gray', 'export_subtitle_line_spacing', 'export_subtitle_kerning', 'export_subtitle_alignment', 'export_subtitle_bold', 'export_subtitle_italic') }}
-              {{ typography_section('Chapter', 'contentChapterFormat', 'export_content_chapter_font_size', 'export_content_chapter_font', 'export_content_chapter_gray', 'export_content_chapter_line_spacing', 'export_content_chapter_kerning', 'export_content_chapter_alignment', 'export_content_chapter_bold', 'export_content_chapter_italic') }}
-              {{ typography_section('Header', 'headerFormat', 'export_header_font_size', 'export_header_font', 'export_header_gray', 'export_header_line_spacing', 'export_header_kerning', 'export_header_alignment', 'export_header_bold', 'export_header_italic') }}
+              {{ typography_section('Title', 'titleFormat', 'export_title_font_size', 'export_title_font', 'export_title_gray', 'export_title_line_spacing', 'export_title_kerning', 'export_title_alignment', 'export_title_bold', 'export_title_italic', extra_fields=[
+                {'id': 'exportTitleMarginAbove', 'label': 'Above', 'key': 'export_title_margin_above', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportTitleMarginBelow', 'label': 'Below', 'key': 'export_title_margin_below', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'}
+              ]) }}
+              {{ typography_section('Subtitle', 'subtitleFormat', 'export_subtitle_font_size', 'export_subtitle_font', 'export_subtitle_gray', 'export_subtitle_line_spacing', 'export_subtitle_kerning', 'export_subtitle_alignment', 'export_subtitle_bold', 'export_subtitle_italic', extra_fields=[
+                {'id': 'exportSubtitleMarginAbove', 'label': 'Above', 'key': 'export_subtitle_margin_above', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportSubtitleMarginBelow', 'label': 'Below', 'key': 'export_subtitle_margin_below', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'}
+              ]) }}
+              {{ typography_section('Chapter', 'contentChapterFormat', 'export_content_chapter_font_size', 'export_content_chapter_font', 'export_content_chapter_gray', 'export_content_chapter_line_spacing', 'export_content_chapter_kerning', 'export_content_chapter_alignment', 'export_content_chapter_bold', 'export_content_chapter_italic', extra_fields=[
+                {'id': 'exportContentChapterMarginAbove', 'label': 'Above', 'key': 'export_content_chapter_margin_above', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportContentChapterMarginBelow', 'label': 'Below', 'key': 'export_content_chapter_margin_below', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'}
+              ]) }}
+              {{ typography_section('Header', 'headerFormat', 'export_header_font_size', 'export_header_font', 'export_header_gray', 'export_header_line_spacing', 'export_header_kerning', 'export_header_alignment', 'export_header_bold', 'export_header_italic', extra_fields=[
+                {'id': 'exportHeaderMarginAbove', 'label': 'Above', 'key': 'export_header_margin_above', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'},
+                {'id': 'exportHeaderMarginBelow', 'label': 'Below', 'key': 'export_header_margin_below', 'min': '0', 'max': '2', 'step': '0.01', 'unit': 'in'}
+              ]) }}
             </div>
           </div>
         </div>

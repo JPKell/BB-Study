@@ -74,8 +74,7 @@ def _sync_sqlite_schema():
     if 'relative_page_number' not in content_columns:
         db.session.execute(text('ALTER TABLE book_content ADD COLUMN relative_page_number INTEGER'))
         db.session.commit()
-    from .page_numbers import populate_book_relative_page_numbers
-    populate_book_relative_page_numbers()
+
     db.session.execute(text(
         'CREATE TABLE IF NOT EXISTS book_content_formats ('
         'id INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -195,6 +194,22 @@ def _sync_sqlite_schema():
     if 'rank' not in commentary_columns:
         db.session.execute(text('ALTER TABLE commentary ADD COLUMN rank INTEGER'))
         db.session.commit()
+    db.session.execute(text(
+        'CREATE TABLE IF NOT EXISTS reflect_prompts ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'book_id INTEGER NOT NULL, '
+        'chapter VARCHAR(100), '
+        'page VARCHAR(20), '
+        'paragraph INTEGER, '
+        'verse INTEGER, '
+        'prompt_text TEXT NOT NULL, '
+        'rank INTEGER, '
+        'created_at DATETIME, '
+        'updated_at DATETIME, '
+        'FOREIGN KEY(book_id) REFERENCES books(id)'
+        ')'
+    ))
+    db.session.commit()
 
     reference_columns = {col['name'] for col in inspector.get_columns('book_references')}
     if 'source_verse' not in reference_columns:
@@ -239,6 +254,9 @@ def _seed_settings():
         'export_page_size': 'letter',
         'export_book_alignment': 'justify',
         'export_definition_alignment': 'left',
+        'export_definition_header_alignment': 'left',
+        'export_reflect_alignment': 'left',
+        'export_reflect_header_alignment': 'left',
         'export_commentary_alignment': 'left',
         'export_annotation_alignment': 'left',
         'export_title_alignment': 'center',
@@ -257,10 +275,32 @@ def _seed_settings():
         'export_content_chapter_italic': '0',
         'export_header_bold': '1',
         'export_header_italic': '0',
+        'export_definition_bold': '0',
+        'export_definition_italic': '0',
+        'export_definition_all_caps': '0',
+        'export_definition_header_bold': '1',
+        'export_definition_header_italic': '0',
+        'export_definition_header_all_caps': '0',
+        'export_reflect_bold': '0',
+        'export_reflect_italic': '0',
+        'export_reflect_all_caps': '0',
+        'export_reflect_header_bold': '1',
+        'export_reflect_header_italic': '0',
+        'export_reflect_header_all_caps': '0',
         'export_title_line_spacing': '1.2',
         'export_subtitle_line_spacing': '1.2',
         'export_content_chapter_line_spacing': '1.2',
         'export_header_line_spacing': '1.2',
+        'export_title_margin_above': '0',
+        'export_title_margin_below': '0',
+        'export_subtitle_margin_above': '0',
+        'export_subtitle_margin_below': '0',
+        'export_content_chapter_margin_above': '0',
+        'export_content_chapter_margin_below': '0',
+        'export_header_margin_above': '0',
+        'export_header_margin_below': '0',
+        'export_definition_margin_above': '0',
+        'export_definition_margin_below': '0',
         'export_title_kerning': '0',
         'export_subtitle_kerning': '0',
         'export_content_chapter_kerning': '0',
@@ -295,32 +335,63 @@ def _seed_settings():
         'export_page_number_font_size': '8',
         'export_book_font_size': '10.2',
         'export_definition_font_size': '8.3',
+        'export_definition_header_font_size': '8.3',
+        'export_reflect_font_size': '8.3',
+        'export_reflect_header_font_size': '8.3',
         'export_commentary_font_size': '7',
         'export_annotation_font_size': '9',
+        'export_inline_marker_font_size': '7.2',
+        'export_footnote_marker_font_size': '6.2',
         'export_chapter_line_spacing': '1.0',
         'export_page_number_line_spacing': '1.0',
         'export_book_line_spacing': '1.35',
         'export_definition_line_spacing': '1.3',
+        'export_definition_header_line_spacing': '1.3',
+        'export_reflect_line_spacing': '1.3',
+        'export_reflect_header_line_spacing': '1.3',
         'export_commentary_line_spacing': '1.28',
         'export_annotation_line_spacing': '1.33',
         'export_chapter_kerning': '0',
         'export_page_number_kerning': '0',
         'export_book_kerning': '0',
         'export_definition_kerning': '0',
+        'export_definition_header_kerning': '0',
+        'export_reflect_kerning': '0',
+        'export_reflect_header_kerning': '0',
         'export_commentary_kerning': '0',
         'export_annotation_kerning': '0',
+        'export_inline_marker_kerning': '0',
+        'export_footnote_marker_kerning': '0',
         'export_chapter_font': 'Helvetica',
         'export_page_number_font': 'Helvetica',
         'export_book_font': 'Times-Roman',
         'export_definition_font': 'Helvetica',
+        'export_definition_header_font': 'Helvetica',
+        'export_reflect_font': 'Helvetica',
+        'export_reflect_header_font': 'Helvetica',
         'export_commentary_font': 'Helvetica',
         'export_annotation_font': 'Helvetica',
+        'export_inline_marker_font': 'Helvetica',
+        'export_footnote_marker_font': 'Helvetica',
         'export_chapter_gray': '30',
         'export_page_number_gray': '40',
         'export_book_gray': '0',
         'export_definition_gray': '0',
+        'export_definition_header_gray': '0',
+        'export_reflect_gray': '0',
+        'export_reflect_header_gray': '0',
         'export_commentary_gray': '0',
         'export_annotation_gray': '0',
+        'export_inline_marker_gray': '0',
+        'export_footnote_marker_gray': '0',
+        'export_inline_marker_raise': '4',
+        'export_footnote_marker_raise': '4',
+        'export_inline_marker_bold': '1',
+        'export_inline_marker_italic': '0',
+        'export_footnote_marker_bold': '1',
+        'export_footnote_marker_italic': '0',
+        'export_reflect_margin_above': '0',
+        'export_reflect_margin_below': '0',
     }
     for key, value in export_defaults.items():
         if not Setting.query.filter_by(key=key).first():

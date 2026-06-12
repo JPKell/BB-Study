@@ -624,11 +624,47 @@ html, body {
   align-items: end;
 }
 
+.export-font-control {
+  min-width: 0;
+}
+
+.export-font-subsection {
+  margin-top: 0.6rem;
+}
+
+.export-font-subsection + .export-font-subsection {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.export-font-subsection .export-font-controls {
+  grid-template-columns: repeat(4, minmax(7rem, 1fr));
+  gap: 0.8rem 0.7rem;
+}
+
+.export-font-subsection .export-gray-control,
+.export-font-subsection .export-style-switches {
+  grid-column: span 2;
+}
+
 .export-style-switches {
   display: flex;
   gap: 0.9rem;
-  align-items: end;
+  align-items: center;
+  align-self: end;
+  flex-wrap: wrap;
   min-height: 2rem;
+  padding-bottom: 0.1rem;
+}
+
+.export-style-switches .form-check {
+  margin-bottom: 0 !important;
+  min-width: 4.7rem;
+}
+
+.export-style-switches .form-check-label {
+  white-space: nowrap;
 }
 
 .export-font-row:last-child {
@@ -685,6 +721,21 @@ html, body {
 
 @media (max-width: 767.98px) {
   .export-font-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .export-font-subsection .export-font-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .export-font-subsection .export-gray-control,
+  .export-font-subsection .export-style-switches {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 479.98px) {
+  .export-font-subsection .export-font-controls {
     grid-template-columns: 1fr;
   }
 }

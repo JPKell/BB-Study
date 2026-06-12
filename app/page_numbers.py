@@ -1,6 +1,3 @@
-from sqlalchemy import text
-
-
 def roman_to_int(value):
     """Return an integer for a roman numeral page label, or None."""
     text = str(value or '').strip().lower()
@@ -60,27 +57,63 @@ def calculate_relative_page_numbers(page_labels):
     return mapping
 
 
+def _relative_page_mapping_preserving_existing(page_labels, existing_by_page):
+    pages = sorted({str(page) for page in page_labels if page is not None and str(page) != ''}, key=page_label_sort_key)
+    calculated = calculate_relative_page_numbers(pages)
+    resolved = {}
+    used_relative_numbers = set()
+    for page in pages:
+        relative = existing_by_page.get(page)
+        if relative is None:
+            continue
+        resolved[page] = relative
+        used_relative_numbers.add(relative)
+    for page in pages:
+        if page in resolved:
+            continue
+        relative = calculated.get(page)
+        if relative is None:
+            continue
+        while relative in used_relative_numbers:
+            relative += 1
+        resolved[page] = relative
+        used_relative_numbers.add(relative)
+    return resolved
+
+
 def populate_book_relative_page_numbers(book_id=None):
     from . import db
     from .models import Book, BookContent
 
     book_ids = [book_id] if book_id else [row[0] for row in db.session.query(Book.id).all()]
+    updated_count = 0
     for current_book_id in book_ids:
-        pages = [
-            row[0]
-            for row in db.session.query(BookContent.page)
+        rows = (
+            BookContent.query
             .filter(BookContent.book_id == current_book_id)
-            .distinct()
+            .filter(BookContent.page.isnot(None))
+            .order_by(BookContent.id)
             .all()
-            if row[0] is not None
-        ]
-        mapping = calculate_relative_page_numbers(pages)
+        )
+        pages = [str(row.page) for row in rows if row.page not in (None, '')]
+        existing_by_page = {}
+        for row in rows:
+            if row.page in (None, '') or row.relative_page_number is None:
+                continue
+            existing_by_page.setdefault(str(row.page), row.relative_page_number)
+
+        mapping = _relative_page_mapping_preserving_existing(pages, existing_by_page)
         for page, relative in mapping.items():
-            db.session.execute(
-                text('UPDATE book_content SET relative_page_number = :relative WHERE book_id = :book_id AND page = :page'),
-                {'relative': relative, 'book_id': current_book_id, 'page': page},
+            updated_count += (
+                BookContent.query
+                .filter(BookContent.book_id == current_book_id)
+                .filter(BookContent.page == page)
+                .filter(BookContent.relative_page_number.is_(None))
+                .update({'relative_page_number': relative}, synchronize_session=False)
             )
-    db.session.commit()
+    if updated_count:
+        db.session.commit()
+    return updated_count
 
 
 def relative_page_for_label(book_id, page):

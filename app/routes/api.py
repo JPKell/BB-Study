@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, BookLocation,
                       DictionaryLookup, BookReference, BookContent, BookContentFormat,
                       BookPageFormat, BookTableOfContents, ContentTopic, Commentary, Source,
-                      SourceUrl, Topic)
+                      ReflectPrompt, SourceUrl, Topic)
 from ..page_numbers import populate_book_relative_page_numbers
 from .. import db
 
@@ -163,6 +163,7 @@ def _page_annotation_rank_scope(book_id, page):
     if not book_id or page in (None, ''):
         return []
     rows = list(Commentary.query.filter_by(book_id=book_id, page=page).all())
+    rows.extend(ReflectPrompt.query.filter_by(book_id=book_id, page=page).all())
     rows.extend(BookReference.query.filter(BookReference.source_book_id == book_id,
                                            BookReference.source_page == page).all())
     rows.extend(Source.query.filter_by(book_id=book_id, page=page).all())
@@ -1049,7 +1050,6 @@ def create_book_content():
     )
     db.session.add(bc)
     db.session.commit()
-    populate_book_relative_page_numbers(bc.book_id)
     return _ok(bc.to_dict(), 'Content created'), 201
 
 
@@ -1069,9 +1069,6 @@ def update_book_content(cid):
     if 'chapter_name' in data and 'chapter' not in data:
         bc.chapter = data['chapter_name']
     db.session.commit()
-    populate_book_relative_page_numbers(bc.book_id)
-    if original_book_id != bc.book_id:
-        populate_book_relative_page_numbers(original_book_id)
     return _ok(bc.to_dict())
 
 
@@ -1476,6 +1473,71 @@ def delete_commentary(cid):
     return _ok(msg='Commentary deleted')
 
 
+# ── Reflect prompts ───────────────────────────────────────────────────────────
+
+@api_bp.route('/reflect-prompts', methods=['GET'])
+def list_reflect_prompts():
+    book_id = request.args.get('book_id', type=int)
+    page = request.args.get('page')
+    q = ReflectPrompt.query
+    if book_id:
+        q = q.filter_by(book_id=book_id)
+    if page:
+        q = q.filter_by(page=page)
+    rows = q.all()
+    rows.sort(key=lambda prompt: (_rank_value(prompt), *_row_order_value(prompt)))
+    return jsonify([prompt.to_dict() for prompt in rows])
+
+
+@api_bp.route('/reflect-prompts', methods=['POST'])
+def create_reflect_prompt():
+    data = request.get_json(force=True) or {}
+    if not data.get('book_id') or not data.get('prompt_text'):
+        return _err('book_id and prompt_text are required')
+    Book.query.get_or_404(data['book_id'])
+    prompt = ReflectPrompt(
+        book_id=data['book_id'],
+        chapter=data.get('chapter'),
+        page=data.get('page'),
+        paragraph=data.get('paragraph'),
+        verse=data.get('verse', data.get('line')),
+        prompt_text=data['prompt_text'],
+    )
+    db.session.add(prompt)
+    db.session.flush()
+    _apply_rank(prompt, _page_annotation_rank_scope(prompt.book_id, prompt.page), data.get('rank'))
+    db.session.commit()
+    return _ok(prompt.to_dict(), 'Reflect prompt created'), 201
+
+
+@api_bp.route('/reflect-prompts/<int:prompt_id>', methods=['GET'])
+def get_reflect_prompt(prompt_id):
+    return jsonify(ReflectPrompt.query.get_or_404(prompt_id).to_dict())
+
+
+@api_bp.route('/reflect-prompts/<int:prompt_id>', methods=['PUT'])
+def update_reflect_prompt(prompt_id):
+    prompt = ReflectPrompt.query.get_or_404(prompt_id)
+    data = request.get_json(force=True) or {}
+    field_aliases = {'line': 'verse'}
+    for field in ('book_id', 'chapter', 'page', 'paragraph', 'verse', 'line', 'prompt_text', 'rank'):
+        if field in data and field != 'rank':
+            setattr(prompt, field_aliases.get(field, field), data[field])
+    if 'rank' in data or prompt.rank is None:
+        _apply_rank(prompt, _page_annotation_rank_scope(prompt.book_id, prompt.page), data.get('rank'))
+    prompt.updated_at = datetime.utcnow()
+    db.session.commit()
+    return _ok(prompt.to_dict())
+
+
+@api_bp.route('/reflect-prompts/<int:prompt_id>', methods=['DELETE'])
+def delete_reflect_prompt(prompt_id):
+    prompt = ReflectPrompt.query.get_or_404(prompt_id)
+    db.session.delete(prompt)
+    db.session.commit()
+    return _ok(msg='Reflect prompt deleted')
+
+
 # ── Sources ───────────────────────────────────────────────────────────────────
 
 @api_bp.route('/sources', methods=['GET'])
@@ -1556,6 +1618,44 @@ def delete_source(sid):
 
 # ── Page summary ──────────────────────────────────────────────────────────────
 
+def _summary_excerpt(value, max_length=420):
+    text = ' '.join((value or '').split())
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rstrip() + '...'
+
+
+def _content_topic_summary_dict(link, content=None, topic=None):
+    start_id = link.start_content_id or link.book_content_id
+    end_id = link.end_content_id or start_id
+    low_id = min(start_id, end_id) if start_id and end_id else start_id
+    high_id = max(start_id, end_id) if start_id and end_id else end_id
+    content = content or link.content
+    topic = topic or link.topic
+    return {
+        'id': link.id,
+        'topic_id': link.topic_id,
+        'topic_name': topic.name if topic else None,
+        'book_content_id': link.book_content_id,
+        'start_content_id': start_id,
+        'end_content_id': end_id,
+        'low_content_id': low_id,
+        'high_content_id': high_id,
+        'book_id': content.book_id if content else None,
+        'book_title': content.book.title if content and content.book else None,
+        'chapter_number': content.chapter_number if content else None,
+        'chapter_name': content.chapter_name if content else None,
+        'page': content.page if content else None,
+        'paragraph': content.paragraph if content else None,
+        'line': content.line if content else None,
+        'verse': content.verse if content else None,
+        'content': _summary_excerpt(content.content if content else ''),
+        'notes': link.notes,
+        'rank': link.rank,
+        'created_at': link.created_at.isoformat() if link.created_at else None,
+    }
+
+
 @api_bp.route('/page-summary', methods=['GET'])
 def page_summary():
     """Return all annotations for a specific book page."""
@@ -1571,6 +1671,10 @@ def page_summary():
     commentary_rows = Commentary.query.filter_by(book_id=book_id, page=page).all()
     commentary_rows.sort(key=lambda c: (_rank_value(c), *_row_order_value(c)))
     commentary = [c.to_dict() for c in commentary_rows]
+
+    reflect_rows = ReflectPrompt.query.filter_by(book_id=book_id, page=page).all()
+    reflect_rows.sort(key=lambda prompt: (_rank_value(prompt), *_row_order_value(prompt)))
+    reflect = [prompt.to_dict() for prompt in reflect_rows]
 
     ref_rows = (BookReference.query.filter(
                 BookReference.source_book_id == book_id,
@@ -1597,23 +1701,21 @@ def page_summary():
     content_ids = [c['id'] for c in content]
     topic_links = []
     if content_ids:
-        page_low_id = min(content_ids)
-        page_high_id = max(content_ids)
-        links = ContentTopic.query.order_by(ContentTopic.created_at).all()
-        topic_links = []
-        for link in links:
-            low_id, high_id = _content_range_bounds(
-                link.start_content_id or link.book_content_id,
-                link.end_content_id or link.book_content_id,
-            )
-            if low_id <= page_high_id and high_id >= page_low_id:
-                topic_links.append(link)
-        topic_links.sort(key=lambda link: (_rank_value(link), *_row_order_value(link)))
-        topic_links = [link.to_dict() for link in topic_links]
+        topic_rows = (db.session.query(ContentTopic, BookContent, Topic)
+                      .join(BookContent, ContentTopic.book_content_id == BookContent.id)
+                      .join(Topic, ContentTopic.topic_id == Topic.id)
+                      .filter(BookContent.book_id == book_id, BookContent.page == page)
+                      .all())
+        topic_rows.sort(key=lambda row: (_rank_value(row[0]), *_row_order_value(row[0])))
+        topic_links = [
+            _content_topic_summary_dict(link, content=content_row, topic=topic)
+            for link, content_row, topic in topic_rows
+        ]
 
     return jsonify({
         'content': content,
         'commentary': commentary,
+        'reflect': reflect,
         'references': refs,
         'sources': sources,
         'dictionary': dict_lookups,
