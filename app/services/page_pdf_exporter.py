@@ -158,6 +158,7 @@ class PageExportData:
     commentary_markers: dict
     references: list
     sources: list
+    commentary_marker_start: int = 1
     page_format: BookPageFormat | None = None
 
 
@@ -298,8 +299,9 @@ def collect_page_export_data(book_id, page):
 
     format_map = collect_content_formats(book_id, page)
     page_format = BookPageFormat.query.filter_by(book_id=book_id, page=str(page)).first()
+    marker_start = chapter_annotation_marker_start(book_id, str(page), rows)
     data = PageExportData(book, str(page), relative_page_number, chapter, rows, format_map, [], definitions,
-                          reflect_rows, commentary, [], {}, references, sources, page_format)
+                          reflect_rows, commentary, [], {}, references, sources, marker_start, page_format)
     refresh_commentary_export(data)
     return data
 
@@ -309,10 +311,57 @@ def refresh_commentary_export(data):
     commentary_items, commentary_markers = build_annotation_markers(
         annotation_note_rows(data),
         fallback_location=fallback_location,
+        start=getattr(data, 'commentary_marker_start', 1),
     )
     data.commentary = commentary_items
     data.commentary_markers = commentary_markers
     data.paragraphs = build_marked_page_paragraphs(data.content_rows, commentary_markers, data.format_map)
+
+
+def chapter_annotation_marker_start(book_id, page, rows):
+    if not rows:
+        return 1
+    current_chapter = next((row.chapter_name or row.chapter for row in rows if row.chapter_name or row.chapter), '')
+    if not current_chapter:
+        return 1
+    current_order = page_order_key_for_rows(rows, page)
+    chapter_rows = (BookContent.query
+                    .filter(BookContent.book_id == book_id,
+                            ((BookContent.chapter_name == current_chapter) |
+                             (BookContent.chapter == current_chapter)))
+                    .order_by(BookContent.relative_page_number, BookContent.page, BookContent.id)
+                    .all())
+    prior_pages = []
+    seen_pages = set()
+    for chapter_row in chapter_rows:
+        row_page = str(chapter_row.page)
+        if row_page in seen_pages:
+            continue
+        seen_pages.add(row_page)
+        row_order = page_order_key_for_rows([chapter_row], row_page)
+        if row_order < current_order:
+            prior_pages.append(row_page)
+    if not prior_pages:
+        return 1
+    return 1 + annotation_count_for_pages(book_id, prior_pages)
+
+
+def page_order_key_for_rows(rows, page):
+    relative = next((row.relative_page_number for row in rows if row.relative_page_number is not None), None)
+    if relative is not None:
+        return (0, relative, page_label_sort_key(str(page)))
+    return (1, *page_label_sort_key(str(page)))
+
+
+def annotation_count_for_pages(book_id, pages):
+    if not pages:
+        return 0
+    return (
+        Commentary.query.filter(Commentary.book_id == book_id, Commentary.page.in_(pages)).count()
+        + BookReference.query.filter(BookReference.source_book_id == book_id,
+                                     BookReference.source_page.in_(pages)).count()
+        + Source.query.filter(Source.book_id == book_id, Source.page.in_(pages)).count()
+    )
 
 
 def annotation_note_rows(data):
@@ -414,11 +463,11 @@ def build_commentary_markers(commentary):
     return build_annotation_markers([('commentary', row) for row in commentary])
 
 
-def build_annotation_markers(annotation_rows, fallback_location=None):
+def build_annotation_markers(annotation_rows, fallback_location=None, start=1):
     markers = {}
     items = []
     fallback_location = fallback_location or first_annotation_location(annotation_rows)
-    for index, (kind, row) in enumerate(annotation_rows, start=1):
+    for index, (kind, row) in enumerate(annotation_rows, start=start):
         paragraph, verse = annotation_location(kind, row, fallback_location)
         marker = {
             'number': index,
@@ -914,7 +963,10 @@ def measure_annotation_sections_height(sample, layout, y, data=None):
         + [('reference', row) for row in references]
         + [('source', row) for row in sources]
     )
-    commentary_items.extend(format_commentary(build_annotation_markers(sorted(note_rows, key=lambda item: rank_sort_key(item[1])))[0]))
+    marker_start = getattr(data, 'commentary_marker_start', 1) if data else 1
+    commentary_items.extend(format_commentary(
+        build_annotation_markers(sorted(note_rows, key=lambda item: rank_sort_key(item[1])), start=marker_start)[0]
+    ))
     if commentary_items:
         column_height, fits = measure_commentary_columns_height(commentary_items, layout, y, data)
         if not fits:
@@ -2007,7 +2059,8 @@ def paragraph_tokens(paragraph, preserve_hyphen=False):
                 tokens.append({
                     'type': 'word',
                     'text': word_text,
-                    'markers': markers if word_index == 0 else [],
+                    'markers': [],
+                    'after_markers': markers if word_index == len(words) - 1 else [],
                     'is_bold': bool(fragment.get('is_bold')),
                     'is_italic': bool(fragment.get('is_italic')),
                     'content_role': fragment.get('content_role') or 'body',
@@ -2067,6 +2120,9 @@ def draw_token_line(pdf, tokens, x, y, width, style, alignment='left'):
         draw_text(pdf, cursor_x, y, token.get('text', ''), token_font, token_size,
                   token_color_for(token, style), token_spacing)
         cursor_x += measure_string(token.get('text', ''), token_font, token_size, token_spacing)
+        for marker in token.get('after_markers', []):
+            draw_inline_marker(pdf, marker, cursor_x, y, style)
+            cursor_x += inline_marker_advance(marker, style)
 
 
 def line_leading(tokens, style):
@@ -2117,6 +2173,7 @@ def token_width(token, style):
 
 def word_token_width(token, style):
     marker_width = sum(inline_marker_advance(marker, style) for marker in token.get('markers', []))
+    marker_width += sum(inline_marker_advance(marker, style) for marker in token.get('after_markers', []))
     return marker_width + measure_string(token.get('text', ''), token_font_for(token, style),
                                          token_size_for(token, style),
                                          token_char_spacing_for(token, style))
@@ -2145,9 +2202,6 @@ def draw_original_text_line(pdf, segment, x, y, width, style, justify=False, for
         if prefix:
             draw_text(pdf, cursor_x, y, prefix, style.font, style.size, style.color, style.char_spacing)
             cursor_x += measure_string(prefix, style.font, style.size, style.char_spacing)
-        for marker in fragment.get('markers', []):
-            draw_inline_marker(pdf, marker, cursor_x, y, style)
-            cursor_x += inline_marker_advance(marker, style)
         role = fragment.get('content_role') or 'body'
         role_style = style.role_styles.get(role, {})
         fragment_size = float(role_style.get('size') or style.size)
@@ -2161,6 +2215,9 @@ def draw_original_text_line(pdf, segment, x, y, width, style, justify=False, for
                   grayscale_color(role_style.get('gray')) if role_style.get('gray') is not None else style.color,
                   fragment_spacing)
         cursor_x += measure_string(text, fragment_font, fragment_size, fragment_spacing)
+        for marker in fragment.get('markers', []):
+            draw_inline_marker(pdf, marker, cursor_x, y, style)
+            cursor_x += inline_marker_advance(marker, style)
         previous_text = text
     return y - segment_leading(segment, style)
 

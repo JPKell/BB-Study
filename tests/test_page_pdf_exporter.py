@@ -4,6 +4,7 @@ from app.services.page_pdf_exporter import (
     ExportLayout,
     TextStyle,
     allocate_annotation_columns,
+    build_annotation_markers,
     display_export_text,
     measure_paragraph_block,
     measure_commentary_item_height,
@@ -136,3 +137,31 @@ def test_aa_initials_stay_in_one_book_text_token():
     lines = wrap_word_tokens(paragraph_tokens(paragraph), width, style)
 
     assert display_export_text(lines[0][0]['text']) == 'A.\u00a0A.'
+
+
+def test_inline_marker_is_attached_after_sentence_text():
+    paragraph = [{
+        'fragments': [{
+            'text': 'First sentence.',
+            'markers': [{'number': 7}],
+            'content_role': 'body',
+        }],
+    }]
+
+    tokens = [token for token in paragraph_tokens(paragraph) if token.get('type') == 'word']
+
+    assert tokens[0]['markers'] == []
+    assert tokens[-1]['after_markers'] == [{'number': 7}]
+
+
+def test_annotation_markers_can_start_after_prior_chapter_notes():
+    first = AnnotationRow(1, 'Earlier note.', None)
+    second = AnnotationRow(2, 'Current note.', None)
+
+    items, markers = build_annotation_markers(
+        [('commentary', first), ('commentary', second)],
+        start=4,
+    )
+
+    assert [item[0] for item in items] == [4, 5]
+    assert [marker['number'] for marker in markers[(1, 1)]] == [4, 5]
