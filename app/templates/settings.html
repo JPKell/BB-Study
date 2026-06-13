@@ -345,6 +345,26 @@
               <div class="col-12">
                 <div class="form-check form-switch">
                   <input class="form-check-input export-setting-input" type="checkbox" role="switch"
+                         id="exportIncludeStartBlankPage" data-setting-key="export_include_start_blank_page" value="1"
+                         {% if export_settings.export_include_start_blank_page in ['1', 'true', 'on'] %}checked{% endif %}>
+                  <label class="form-check-label small fw-semibold" for="exportIncludeStartBlankPage">
+                    Start whole-book export with blank page
+                  </label>
+                </div>
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label small fw-semibold" for="exportRelativePageStart">Relative page start</label>
+                <input class="form-control form-control-sm export-setting-input" id="exportRelativePageStart" type="number" min="1" step="1"
+                       data-setting-key="export_relative_page_start" value="{{ export_settings.export_relative_page_start }}">
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label small fw-semibold" for="exportRelativePageEnd">Relative page end</label>
+                <input class="form-control form-control-sm export-setting-input" id="exportRelativePageEnd" type="number" min="1" step="1"
+                       data-setting-key="export_relative_page_end" value="{{ export_settings.export_relative_page_end }}">
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input export-setting-input" type="checkbox" role="switch"
                          id="exportOneColumnTop" data-setting-key="export_one_column_top" value="1"
                          {% if export_settings.export_one_column_top in ['1', 'true', 'on'] %}checked{% endif %}>
                   <label class="form-check-label small fw-semibold" for="exportOneColumnTop">
@@ -486,7 +506,10 @@
           <span>PDF Preview</span>
           {% if preview_pdf_url %}
           <div class="d-flex align-items-center gap-2">
-            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.export_book_pdf', book_id=preview_book.id) }}" target="_blank" rel="noopener">
+            <a class="btn btn-sm btn-outline-secondary" id="exportWholeBookLink"
+               href="{{ url_for('main.export_book_pdf', book_id=preview_book.id) }}"
+               data-base-url="{{ url_for('main.export_book_pdf', book_id=preview_book.id) }}"
+               target="_blank" rel="noopener">
               <i class="bi bi-file-earmark-pdf me-1"></i>Whole Book
             </a>
             <a class="btn btn-sm btn-outline-secondary" href="{{ preview_pdf_url }}" target="_blank" rel="noopener">
@@ -518,6 +541,11 @@
 const EXPORT_SETTING_DEFAULTS = {{ export_setting_defaults|tojson }};
 const EXPORT_PROFILE_SETTING_KEYS = {{ export_profile_setting_keys|list|tojson }};
 const EXPORT_PAGE_SIZE_PROFILE_PREFIXES = {{ export_page_size_profile_prefixes|tojson }};
+const GLOBAL_EXPORT_SETTING_KEYS = new Set([
+  'export_include_start_blank_page',
+  'export_relative_page_start',
+  'export_relative_page_end'
+]);
 let activeExportPageSize = {{ export_settings.export_page_size|tojson }};
 let applyingExportProfile = false;
 
@@ -538,12 +566,19 @@ document.querySelectorAll('.export-setting-input').forEach(input => {
       refreshPreview();
       return;
     }
+    if (GLOBAL_EXPORT_SETTING_KEYS.has(key)) {
+      await saveSetting(key, inputValue(input));
+      updateWholeBookLink();
+      refreshPreview();
+      return;
+    }
     await saveProfileSetting(activeExportPageSize, key, inputValue(input));
     refreshPreview();
   });
 });
 
 document.querySelectorAll('.export-gray-input').forEach(updateGrayControl);
+updateWholeBookLink();
 
 function updateGrayControl(input) {
   if (!input.dataset.grayValue) return;
@@ -613,6 +648,17 @@ function refreshPreview() {
     const baseSrc = preview.src.split('?')[0];
     preview.src = `${baseSrc}?preview=${Date.now()}`;
   });
+}
+
+function updateWholeBookLink() {
+  const link = document.getElementById('exportWholeBookLink');
+  if (!link) return;
+  const url = new URL(link.dataset.baseUrl, window.location.origin);
+  const startInput = settingInput('export_relative_page_start');
+  const endInput = settingInput('export_relative_page_end');
+  if (startInput?.value) url.searchParams.set('relative_start', startInput.value);
+  if (endInput?.value) url.searchParams.set('relative_end', endInput.value);
+  link.href = `${url.pathname}${url.search}`;
 }
 </script>
 {% endblock %}

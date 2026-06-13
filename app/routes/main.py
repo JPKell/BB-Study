@@ -13,9 +13,17 @@ EXPORT_PAGE_SIZE_PROFILE_PREFIXES = {
     'letter': 'export_letter',
     'half_letter': 'export_half_letter',
 }
+EXPORT_GLOBAL_SETTING_KEYS = {
+    'export_include_start_blank_page',
+    'export_relative_page_start',
+    'export_relative_page_end',
+}
 EXPORT_SETTING_DEFAULTS = {
     'export_text_layout': 'reflow_justified',
     'export_page_size': 'letter',
+    'export_include_start_blank_page': '1',
+    'export_relative_page_start': '',
+    'export_relative_page_end': '',
     'export_book_alignment': 'justify',
     'export_definition_alignment': 'left',
     'export_definition_header_alignment': 'left',
@@ -159,7 +167,7 @@ EXPORT_SETTING_DEFAULTS = {
 }
 EXPORT_PROFILE_SETTING_KEYS = tuple(
     key for key in EXPORT_SETTING_DEFAULTS
-    if key != 'export_page_size'
+    if key != 'export_page_size' and key not in EXPORT_GLOBAL_SETTING_KEYS
 )
 
 
@@ -218,6 +226,9 @@ def get_export_setting_values():
     for key, default in EXPORT_SETTING_DEFAULTS.items():
         if key == 'export_page_size':
             continue
+        if key in EXPORT_GLOBAL_SETTING_KEYS:
+            values[key] = _get_setting(key, default)
+            continue
         profile_key = _export_profile_key(page_size, key)
         values[key] = _get_setting(profile_key, _get_setting(key, default))
     values['export_text_layout'] = (
@@ -256,6 +267,21 @@ def _export_int_setting(values, key, minimum=None, maximum=None):
         value = int(float(values.get(key, default)))
     except (TypeError, ValueError):
         value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _export_optional_int_setting(values, key, minimum=None, maximum=None):
+    raw_value = values.get(key, '')
+    if raw_value in (None, ''):
+        return None
+    try:
+        value = int(float(raw_value))
+    except (TypeError, ValueError):
+        return None
     if minimum is not None:
         value = max(minimum, value)
     if maximum is not None:
@@ -474,7 +500,32 @@ def get_preview_page_numbers(book, page):
     return [str(page), facing_page]
 
 
-def get_book_export_page_numbers(book):
+def book_export_pages_from_relative_map(
+    pages_by_relative,
+    include_start_blank=True,
+    start_relative=None,
+    end_relative=None,
+):
+    if not pages_by_relative:
+        return []
+    first_relative = min(pages_by_relative)
+    last_relative = max(pages_by_relative)
+    if start_relative is not None:
+        first_relative = max(first_relative, start_relative)
+    if end_relative is not None:
+        last_relative = min(last_relative, end_relative)
+    if first_relative > last_relative:
+        return []
+    pages = [
+        pages_by_relative.get(relative)
+        for relative in range(first_relative, last_relative + 1)
+    ]
+    if include_start_blank and first_relative % 2:
+        pages.insert(0, None)
+    return pages
+
+
+def get_book_export_page_numbers(book, include_start_blank=True, start_relative=None, end_relative=None):
     if not book:
         return []
     missing_relative_count = (BookContent.query
@@ -494,17 +545,12 @@ def get_book_export_page_numbers(book):
         for page, relative in page_rows
         if relative is not None
     }
-    if not pages_by_relative:
-        return []
-    first_relative = min(pages_by_relative)
-    last_relative = max(pages_by_relative)
-    pages = [
-        pages_by_relative.get(relative)
-        for relative in range(first_relative, last_relative + 1)
-    ]
-    if first_relative % 2:
-        pages.insert(0, None)
-    return pages
+    return book_export_pages_from_relative_map(
+        pages_by_relative,
+        include_start_blank=include_start_blank,
+        start_relative=start_relative,
+        end_relative=end_relative,
+    )
 
 
 def build_preview_pages(book, page):
@@ -852,7 +898,15 @@ def export_page_spread_pdf(book_id, page):
 def export_book_pdf(book_id):
     from ..services.page_pdf_exporter import export_pages_pdf as build_pages_pdf
     book = Book.query.get_or_404(book_id)
-    pages = get_book_export_page_numbers(book)
+    export_settings = get_export_setting_values()
+    start_relative = request.args.get('relative_start', type=int)
+    end_relative = request.args.get('relative_end', type=int)
+    pages = get_book_export_page_numbers(
+        book,
+        include_start_blank=_export_bool_setting(export_settings, 'export_include_start_blank_page'),
+        start_relative=start_relative or _export_optional_int_setting(export_settings, 'export_relative_page_start', 1),
+        end_relative=end_relative or _export_optional_int_setting(export_settings, 'export_relative_page_end', 1),
+    )
     if not pages:
         abort(404)
     layout = build_export_layout()

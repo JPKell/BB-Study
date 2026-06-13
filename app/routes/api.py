@@ -1136,6 +1136,62 @@ def split_book_content(cid):
     return _ok({'left': bc.to_dict(), 'right': new_row.to_dict()}, 'Content split')
 
 
+@api_bp.route('/book-content/<int:cid>/join-next', methods=['POST'])
+def join_next_book_content(cid):
+    bc = BookContent.query.get_or_404(cid)
+    if bc.verse is None:
+        return _err('Selected content must have a verse number to join')
+
+    current_rows = _same_verse_rows(bc.book_id, bc.page, bc.paragraph, bc.verse)
+    next_verse = (db.session.query(db.func.min(BookContent.verse))
+                  .filter(BookContent.book_id == bc.book_id,
+                          BookContent.page == bc.page,
+                          BookContent.paragraph == bc.paragraph,
+                          BookContent.verse > bc.verse)
+                  .scalar())
+    if next_verse is None:
+        return _err('There is no following verse in this paragraph to join')
+
+    next_rows = _same_verse_rows(bc.book_id, bc.page, bc.paragraph, next_verse)
+    if not current_rows or not next_rows:
+        return _err('Could not find both verses to join', 404)
+
+    target_row = current_rows[-1]
+    target_row.content = _combine_content_fragments([target_row, *next_rows])
+    removed_ids = [row.id for row in next_rows]
+    _retarget_content_topic_rows(removed_ids, target_row.id)
+
+    for row in next_rows:
+        db.session.delete(row)
+
+    BookContentFormat.query.filter_by(
+        book_id=bc.book_id,
+        page=bc.page,
+        paragraph=bc.paragraph,
+        verse=next_verse,
+    ).delete(synchronize_session=False)
+
+    _move_book_content_verse_references(bc.book_id, bc.page, bc.paragraph, next_verse, bc.verse)
+    _shift_book_content_verses_down(bc.book_id, bc.page, bc.paragraph, next_verse)
+
+    db.session.commit()
+    populate_book_relative_page_numbers(bc.book_id)
+    return _ok({
+        'joined': _same_verse_rows(bc.book_id, bc.page, bc.paragraph, bc.verse)[0].to_dict(),
+        'removed_verse': next_verse,
+    }, 'Content joined')
+
+
+def _same_verse_rows(book_id, page, paragraph, verse):
+    return (BookContent.query
+            .filter(BookContent.book_id == book_id,
+                    BookContent.page == page,
+                    BookContent.paragraph == paragraph,
+                    BookContent.verse == verse)
+            .order_by(BookContent.line, BookContent.id)
+            .all())
+
+
 def _same_verse_rows_after(row):
     if row.verse is None:
         return []
@@ -1227,6 +1283,129 @@ def _shift_book_content_verses(book_id, page, paragraph, after_verse):
                                               BookLocation.paragraph == paragraph,
                                               BookLocation.line_number > after_verse).all():
         location.line_number += 1
+
+
+def _move_book_content_verse_references(book_id, page, paragraph, from_verse, to_verse):
+    for row in Commentary.query.filter_by(book_id=book_id, page=page,
+                                          paragraph=paragraph, verse=from_verse).all():
+        row.verse = to_verse
+
+    for row in ReflectPrompt.query.filter_by(book_id=book_id, page=page,
+                                             paragraph=paragraph, verse=from_verse).all():
+        row.verse = to_verse
+
+    for row in Source.query.filter_by(book_id=book_id, page=page,
+                                      paragraph=paragraph, verse=from_verse).all():
+        row.verse = to_verse
+
+    for row in BookReference.query.filter_by(source_book_id=book_id, source_page=page,
+                                             source_paragraph=paragraph, source_verse=from_verse).all():
+        row.source_verse = to_verse
+
+    for row in BookReference.query.filter_by(target_book_id=book_id, target_page=page,
+                                             target_paragraph=paragraph, target_verse=from_verse).all():
+        row.target_verse = to_verse
+
+    for location in BookLocation.query.filter_by(book_id=book_id, page=page,
+                                                 paragraph=paragraph, line_number=from_verse).all():
+        location.line_number = to_verse
+
+
+def _shift_book_content_verses_down(book_id, page, paragraph, after_verse):
+    rows = (BookContent.query
+            .filter(BookContent.book_id == book_id,
+                    BookContent.page == page,
+                    BookContent.paragraph == paragraph,
+                    BookContent.verse > after_verse)
+            .order_by(BookContent.verse, BookContent.id)
+            .all())
+    for row in rows:
+        row.verse -= 1
+
+    formats = (BookContentFormat.query
+               .filter(BookContentFormat.book_id == book_id,
+                       BookContentFormat.page == page,
+                       BookContentFormat.paragraph == paragraph,
+                       BookContentFormat.verse > after_verse)
+               .order_by(BookContentFormat.verse, BookContentFormat.id)
+               .all())
+    for fmt in formats:
+        fmt.verse -= 1
+        db.session.flush()
+
+    for row in Commentary.query.filter(Commentary.book_id == book_id,
+                                       Commentary.page == page,
+                                       Commentary.paragraph == paragraph,
+                                       Commentary.verse > after_verse).all():
+        row.verse -= 1
+
+    for row in ReflectPrompt.query.filter(ReflectPrompt.book_id == book_id,
+                                          ReflectPrompt.page == page,
+                                          ReflectPrompt.paragraph == paragraph,
+                                          ReflectPrompt.verse > after_verse).all():
+        row.verse -= 1
+
+    for row in Source.query.filter(Source.book_id == book_id,
+                                   Source.page == page,
+                                   Source.paragraph == paragraph,
+                                   Source.verse > after_verse).all():
+        row.verse -= 1
+
+    for row in BookReference.query.filter(BookReference.source_book_id == book_id,
+                                          BookReference.source_page == page,
+                                          BookReference.source_paragraph == paragraph,
+                                          BookReference.source_verse > after_verse).all():
+        row.source_verse -= 1
+
+    for row in BookReference.query.filter(BookReference.target_book_id == book_id,
+                                          BookReference.target_page == page,
+                                          BookReference.target_paragraph == paragraph,
+                                          BookReference.target_verse > after_verse).all():
+        row.target_verse -= 1
+
+    for location in BookLocation.query.filter(BookLocation.book_id == book_id,
+                                              BookLocation.page == page,
+                                              BookLocation.paragraph == paragraph,
+                                              BookLocation.line_number > after_verse).all():
+        location.line_number -= 1
+
+
+def _retarget_content_topic_rows(old_content_ids, target_content_id):
+    old_ids = {content_id for content_id in old_content_ids if content_id}
+    if not old_ids:
+        return
+    links = ContentTopic.query.filter(
+        (ContentTopic.book_content_id.in_(old_ids)) |
+        (ContentTopic.start_content_id.in_(old_ids)) |
+        (ContentTopic.end_content_id.in_(old_ids))
+    ).all()
+    for link in links:
+        duplicate = None
+        if link.book_content_id in old_ids:
+            duplicate = ContentTopic.query.filter(
+                ContentTopic.id != link.id,
+                ContentTopic.topic_id == link.topic_id,
+                ContentTopic.book_content_id == target_content_id,
+            ).first()
+        if duplicate:
+            duplicate.start_content_id = min(
+                duplicate.start_content_id or duplicate.book_content_id,
+                link.start_content_id or link.book_content_id,
+                target_content_id,
+            )
+            duplicate.end_content_id = max(
+                duplicate.end_content_id or duplicate.book_content_id,
+                link.end_content_id or link.book_content_id,
+                target_content_id,
+            )
+            db.session.delete(link)
+            continue
+        if link.book_content_id in old_ids:
+            link.book_content_id = target_content_id
+        if link.start_content_id in old_ids:
+            link.start_content_id = target_content_id
+        if link.end_content_id in old_ids:
+            link.end_content_id = target_content_id
 
 
 def _shift_book_content_lines(book_id, page, paragraph, after_line):

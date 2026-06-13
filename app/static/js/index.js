@@ -1731,6 +1731,29 @@ document.getElementById('splitForm')?.addEventListener('submit', async function 
   location.reload();
 });
 
+document.getElementById('joinNextVerseBtn')?.addEventListener('click', async function () {
+  const contentId = document.getElementById('splitContentId').value;
+  if (!contentId) {
+    showAlert('Select a verse to join first', 'warning');
+    return;
+  }
+
+  this.disabled = true;
+  const res = await fetch(`/api/book-content/${contentId}/join-next`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  }).then(r => r.json()).catch(() => ({ error: 'Join failed' }));
+  this.disabled = false;
+
+  if (res.error) {
+    showAlert(res.error || 'Join failed', 'danger');
+    return;
+  }
+  showAlert('Verses joined', 'success', 1200);
+  location.reload();
+});
+
 /* ── Add content modal (save button) ───────────────────────────────────────── */
 
 document.getElementById('saveContentBtn').addEventListener('click', async function () {
