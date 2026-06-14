@@ -119,14 +119,14 @@ html, body {
   scrollbar-width: thin;
 }
 
-/* Content lines – subtle hover highlight */
-.line-text {
+/* Selectable sentence text */
+.sentence-verse {
   padding: 1px 4px;
   border-radius: 3px;
   cursor: default;
   transition: background-color 0.15s;
 }
-.line-text:hover {
+.sentence-verse:hover {
   background-color: rgba(var(--bs-primary-rgb), 0.12);
 }
 .verse-fragment,
@@ -149,34 +149,13 @@ html, body {
   box-shadow: 0 0 0 4px rgba(var(--bs-primary-rgb), 0.16);
   cursor: text;
 }
-.book-line {
-  position: relative;
+.book-paragraph {
   max-width: 65ch;
   margin-left: auto;
   margin-right: auto;
-  padding-left: 2.25em;
-  min-height: 1.45rem;
-  white-space: normal;
+  margin-bottom: 1rem;
   text-align: left;
   line-height: 1.6;
-}
-.sentence-verse {
-  position: relative;
-  max-width: 65ch;
-  margin-left: auto;
-  margin-right: auto;
-  padding-left: 2.25em;
-  min-height: 1.45rem;
-  text-align: left;
-  line-height: 1.6;
-}
-.book-line + .book-line,
-.sentence-verse + .sentence-verse {
-  margin-top: 0.15rem;
-}
-.book-line[data-paragraph-start="true"],
-.sentence-verse[data-paragraph-start="true"] {
-  margin-top: 1rem;
 }
 .formatted-bold {
   font-weight: 700;
@@ -201,14 +180,10 @@ html, body {
 .formatted-role-poetry {
   display: block;
 }
-.book-line > .line-text.formatted-role-title,
-.book-line > .line-text.formatted-role-subtitle,
-.book-line > .line-text.formatted-role-chapter,
-.book-line > .line-text.formatted-role-poetry,
-.sentence-verse > .verse-fragment.formatted-role-title,
-.sentence-verse > .verse-fragment.formatted-role-subtitle,
-.sentence-verse > .verse-fragment.formatted-role-chapter,
-.sentence-verse > .verse-fragment.formatted-role-poetry {
+.sentence-verse.formatted-role-title,
+.sentence-verse.formatted-role-subtitle,
+.sentence-verse.formatted-role-chapter,
+.sentence-verse.formatted-role-poetry {
   display: inline;
 }
 .formatted-align-left {
@@ -446,8 +421,7 @@ html, body {
     padding-left: 0;
     padding-right: 0;
   }
-  .book-line,
-  .sentence-verse {
+  .book-paragraph {
     max-width: none;
   }
 }

@@ -183,8 +183,7 @@ def _sync_location_from_line_text(location):
 
     rows = (BookContent.query
             .filter_by(book_id=location.book_id)
-            .order_by(BookContent.page, BookContent.paragraph, BookContent.verse,
-                      BookContent.line, BookContent.id)
+            .order_by(BookContent.page, BookContent.paragraph, BookContent.verse, BookContent.id)
             .all())
 
     grouped = defaultdict(list)
@@ -207,7 +206,7 @@ def _sync_location_from_line_text(location):
             location.chapter = row.chapter_name or row.chapter
             location.page = row.page
             location.paragraph = row.paragraph
-            location.line_number = row.verse or row.line
+            location.line_number = row.verse
             location.line_text = row.content
             return True
 
@@ -612,11 +611,9 @@ def get_book_content_range():
         'chapter_name': first.chapter_name or first.chapter,
         'page': first.page,
         'paragraph': first.paragraph,
-        'line': first.line,
         'verse': first.verse,
         'end_page': last.page,
         'end_paragraph': last.paragraph,
-        'end_line': last.line,
         'end_verse': last.verse,
         'content': _combine_content_fragments(rows),
         'content_ids': [row.id for row in rows],
@@ -681,7 +678,7 @@ def search_content():
     if book_id:
         rows_query = rows_query.filter_by(book_id=book_id)
     rows = rows_query.order_by(BookContent.book_id, BookContent.page, BookContent.paragraph,
-                               BookContent.verse, BookContent.line, BookContent.id).all()
+                               BookContent.verse, BookContent.id).all()
 
     tagged_ranges = []
     topic_name_matches = []
@@ -745,7 +742,6 @@ def search_content():
             'page': first.page,
             'paragraph': first.paragraph,
             'verse': first.verse,
-            'line': first.line,
             'excerpt': verse_text,
             'content_ids': content_ids,
             'topics': topics,
@@ -833,7 +829,7 @@ def create_book_location():
         chapter=data.get('chapter'),
         page=data.get('page'),
         paragraph=data.get('paragraph'),
-        line_number=data.get('line_number'),
+        line_number=data.get('verse_number', data.get('line_number')),
         line_text=data.get('line_text'),
     )
     matched = _sync_location_from_line_text(loc)
@@ -849,9 +845,11 @@ def update_book_location(lid):
     loc = BookLocation.query.get_or_404(lid)
     data = request.get_json(force=True) or {}
     should_sync = 'line_text' in data or 'book_id' in data
-    for field in ('book_id', 'chapter', 'page', 'paragraph', 'line_number', 'line_text'):
+    for field in ('book_id', 'chapter', 'page', 'paragraph', 'line_text'):
         if field in data:
             setattr(loc, field, data[field])
+    if 'verse_number' in data or 'line_number' in data:
+        loc.line_number = data.get('verse_number', data.get('line_number'))
     matched = _sync_location_from_line_text(loc) if should_sync else False
     db.session.commit()
     result = loc.to_dict()
@@ -958,12 +956,12 @@ def create_reference():
         source_chapter=data.get('source_chapter'),
         source_page=data.get('source_page'),
         source_paragraph=data.get('source_paragraph'),
-        source_verse=data.get('source_verse', data.get('source_line')),
+        source_verse=data.get('source_verse'),
         target_book_id=data['target_book_id'],
         target_chapter=data.get('target_chapter'),
         target_page=data.get('target_page'),
         target_paragraph=data.get('target_paragraph'),
-        target_verse=data.get('target_verse', data.get('target_line')),
+        target_verse=data.get('target_verse'),
         quoted_text=data.get('quoted_text'),
         comments=data.get('comments'),
     )
@@ -983,14 +981,13 @@ def get_reference(rid):
 def update_reference(rid):
     ref = BookReference.query.get_or_404(rid)
     data = request.get_json(force=True) or {}
-    field_aliases = {'source_line': 'source_verse', 'target_line': 'target_verse'}
     fields = ('source_book_id', 'source_chapter', 'source_page', 'source_paragraph',
-              'source_verse', 'source_line', 'target_book_id', 'target_chapter',
-              'target_page', 'target_paragraph', 'target_verse', 'target_line',
+              'source_verse', 'target_book_id', 'target_chapter',
+              'target_page', 'target_paragraph', 'target_verse',
               'quoted_text', 'comments', 'rank')
     for field in fields:
         if field in data and field != 'rank':
-            setattr(ref, field_aliases.get(field, field), data[field])
+            setattr(ref, field, data[field])
     if 'rank' in data or ref.rank is None:
         _apply_rank(ref, _page_annotation_rank_scope(ref.source_book_id, ref.source_page), data.get('rank'))
     db.session.commit()
@@ -1027,7 +1024,7 @@ def list_book_content():
         q = q.filter_by(content_mode=content_mode)
     results = q.order_by(BookContent.chapter_number, BookContent.chapter_name, BookContent.relative_page_number,
                          BookContent.page,
-                         BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id).all()
+                         BookContent.paragraph, BookContent.verse, BookContent.id).all()
     return jsonify([r.to_dict() for r in results])
 
 
@@ -1044,7 +1041,6 @@ def create_book_content():
         chapter=data.get('chapter_name') or data.get('chapter'),
         page=data.get('page'),
         paragraph=data.get('paragraph'),
-        line=data.get('line'),
         verse=data.get('verse'),
         content=data['content'],
     )
@@ -1063,7 +1059,7 @@ def update_book_content(cid):
     bc = BookContent.query.get_or_404(cid)
     original_book_id = bc.book_id
     data = request.get_json(force=True) or {}
-    for field in ('book_id', 'content_mode', 'chapter_number', 'chapter_name', 'chapter', 'page', 'paragraph', 'line', 'verse', 'content'):
+    for field in ('book_id', 'content_mode', 'chapter_number', 'chapter_name', 'chapter', 'page', 'paragraph', 'verse', 'content'):
         if field in data:
             setattr(bc, field, data[field])
     if 'chapter_name' in data and 'chapter' not in data:
@@ -1089,19 +1085,11 @@ def split_book_content(cid):
             verse=bc.verse,
         ).first()
 
-    new_verse = None
-    new_line = bc.line
     if bc.verse is not None:
         new_verse = bc.verse + 1
-        continuation_rows = _same_verse_rows_after(bc)
         _shift_book_content_verses(bc.book_id, bc.page, bc.paragraph, bc.verse)
-        for row in continuation_rows:
-            row.verse = new_verse
-    elif bc.line is not None:
-        new_line = bc.line + 1
-        _shift_book_content_lines(bc.book_id, bc.page, bc.paragraph, bc.line)
     else:
-        return _err('Selected content must have a verse or line number to split')
+        return _err('Selected content must have a verse number to split')
 
     bc.content = left
     new_row = BookContent(
@@ -1112,7 +1100,6 @@ def split_book_content(cid):
         chapter=bc.chapter,
         page=bc.page,
         paragraph=bc.paragraph,
-        line=new_line,
         verse=new_verse,
         content=right,
     )
@@ -1188,28 +1175,12 @@ def _same_verse_rows(book_id, page, paragraph, verse):
                     BookContent.page == page,
                     BookContent.paragraph == paragraph,
                     BookContent.verse == verse)
-            .order_by(BookContent.line, BookContent.id)
+            .order_by(BookContent.id)
             .all())
 
 
 def _same_verse_rows_after(row):
-    if row.verse is None:
-        return []
-    rows = (BookContent.query
-            .filter(BookContent.book_id == row.book_id,
-                    BookContent.page == row.page,
-                    BookContent.paragraph == row.paragraph,
-                    BookContent.verse == row.verse,
-                    BookContent.id != row.id)
-            .order_by(BookContent.line, BookContent.id)
-            .all())
-
-    def after_split(candidate):
-        if row.line is None or candidate.line is None:
-            return candidate.id > row.id
-        return (candidate.line, candidate.id) > (row.line, row.id)
-
-    return [candidate for candidate in rows if after_split(candidate)]
+    return []
 
 
 def _split_content_parts(original, data):
@@ -1406,18 +1377,6 @@ def _retarget_content_topic_rows(old_content_ids, target_content_id):
             link.start_content_id = target_content_id
         if link.end_content_id in old_ids:
             link.end_content_id = target_content_id
-
-
-def _shift_book_content_lines(book_id, page, paragraph, after_line):
-    rows = (BookContent.query
-            .filter(BookContent.book_id == book_id,
-                    BookContent.page == page,
-                    BookContent.paragraph == paragraph,
-                    BookContent.line > after_line)
-            .order_by(BookContent.line.desc(), BookContent.id.desc())
-            .all())
-    for row in rows:
-        row.line += 1
 
 
 @api_bp.route('/book-content/<int:cid>', methods=['DELETE'])
@@ -1826,7 +1785,6 @@ def _content_topic_summary_dict(link, content=None, topic=None):
         'chapter_name': content.chapter_name if content else None,
         'page': content.page if content else None,
         'paragraph': content.paragraph if content else None,
-        'line': content.line if content else None,
         'verse': content.verse if content else None,
         'content': _summary_excerpt(content.content if content else ''),
         'notes': link.notes,
@@ -1845,7 +1803,7 @@ def page_summary():
 
     content = [c.to_dict() for c in
                BookContent.query.filter_by(book_id=book_id, page=page)
-               .order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id).all()]
+               .order_by(BookContent.paragraph, BookContent.verse, BookContent.id).all()]
 
     commentary_rows = Commentary.query.filter_by(book_id=book_id, page=page).all()
     commentary_rows.sort(key=lambda c: (_rank_value(c), *_row_order_value(c)))

@@ -5,10 +5,8 @@
 const BB_STUDY_CONTEXT = window.BB_STUDY_CONTEXT || {};
 const CURRENT_BOOK_ID = BB_STUDY_CONTEXT.currentBookId || null;
 const CURRENT_PAGE = BB_STUDY_CONTEXT.currentPage || null;
-const CONTENT_MODE = BB_STUDY_CONTEXT.contentMode || 'sentence';
 const SECONDARY_BOOK_ID = BB_STUDY_CONTEXT.secondaryBookId || null;
 const SECONDARY_PAGE = BB_STUDY_CONTEXT.secondaryPage || null;
-const SECONDARY_CONTENT_MODE = BB_STUDY_CONTEXT.secondaryContentMode || 'sentence';
 let currentRefEditId = null;
 let currentCommEditId = null;
 let currentReflectEditId = null;
@@ -39,7 +37,6 @@ document.getElementById('primaryTocSelect')?.addEventListener('change', function
   setValue('pageInput', this.value);
   loadPage();
 });
-document.getElementById('contentModeSelect')?.addEventListener('change', loadPage);
 document.getElementById('secondaryBookSelect')?.addEventListener('change', function () {
   const bookId = this.value;
   if (!bookId) return;
@@ -57,7 +54,6 @@ document.getElementById('secondaryTocSelect')?.addEventListener('change', functi
   setValue('secondaryPageInput', this.value);
   loadSecondaryPage();
 });
-document.getElementById('secondaryContentModeSelect')?.addEventListener('change', loadSecondaryPage);
 document.getElementById('readSearchQuery').addEventListener('keydown', e => {
   if (e.key === 'Enter') runReadSearch();
   if (e.key === 'Escape') hideReadSearchResults();
@@ -81,14 +77,11 @@ function loadPage() {
   const page = document.getElementById('pageInput').value.trim();
   if (!page) return;
   const bookId = document.getElementById('bookSelect')?.value || CURRENT_BOOK_ID;
-  const modeSelect = document.getElementById('contentModeSelect');
-  const mode = modeSelect ? modeSelect.value : (typeof CONTENT_MODE === 'undefined' ? 'sentence' : CONTENT_MODE);
   Promise.all([
     persistSetting('current_page', page),
     bookId ? persistSetting(`book_${bookId}_page`, page) : Promise.resolve(),
-    bookId ? persistSetting(`book_${bookId}_content_mode`, mode) : Promise.resolve(),
   ]).then(() => {
-    window.location.href = buildReaderUrl({ bookId, page, contentMode: mode });
+    window.location.href = buildReaderUrl({ bookId, page });
   });
 }
 
@@ -97,14 +90,12 @@ function loadSecondaryPage() {
   if (!bookId) { showAlert('Select a second book first', 'warning'); return; }
   const page = document.getElementById('secondaryPageInput')?.value.trim();
   if (!page) return;
-  const mode = document.getElementById('secondaryContentModeSelect')?.value || SECONDARY_CONTENT_MODE || 'sentence';
   Promise.all([
     persistSetting('current_secondary_book_id', bookId),
     persistSetting(`book_${bookId}_page`, page),
-    persistSetting(`book_${bookId}_content_mode`, mode),
   ]).then(() => {
     localStorage.setItem(BOOK_PANE_TAB_KEY, '#secondaryBookPane');
-    window.location.href = buildReaderUrl({ secondaryBookId: bookId, secondaryPage: page, secondaryContentMode: mode });
+    window.location.href = buildReaderUrl({ secondaryBookId: bookId, secondaryPage: page });
   });
 }
 
@@ -115,9 +106,6 @@ function buildReaderUrl(overrides = {}) {
   const primaryPage = overrides.page !== undefined
     ? overrides.page
     : (document.getElementById('pageInput')?.value.trim() || CURRENT_PAGE || '');
-  const primaryMode = overrides.contentMode !== undefined
-    ? overrides.contentMode
-    : (document.getElementById('contentModeSelect')?.value || CONTENT_MODE || 'sentence');
 
   const secondaryBookId = overrides.secondaryBookId !== undefined
     ? overrides.secondaryBookId
@@ -125,17 +113,12 @@ function buildReaderUrl(overrides = {}) {
   const secondaryPage = overrides.secondaryPage !== undefined
     ? overrides.secondaryPage
     : (document.getElementById('secondaryPageInput')?.value.trim() || SECONDARY_PAGE || '');
-  const secondaryMode = overrides.secondaryContentMode !== undefined
-    ? overrides.secondaryContentMode
-    : (document.getElementById('secondaryContentModeSelect')?.value || SECONDARY_CONTENT_MODE || 'sentence');
 
   const params = new URLSearchParams();
   if (primaryBookId) params.set('book_id', primaryBookId);
   if (primaryBookId && primaryPage) params.set('page', primaryPage);
-  if (primaryBookId && primaryMode) params.set('content_mode', primaryMode);
   if (secondaryBookId) params.set('secondary_book_id', secondaryBookId);
   if (secondaryBookId && secondaryPage) params.set('secondary_page', secondaryPage);
-  if (secondaryBookId && secondaryMode) params.set('secondary_content_mode', secondaryMode);
   const query = params.toString();
   return query ? `/?${query}` : '/';
 }
@@ -218,9 +201,7 @@ function renderSearchResult(result) {
       <div class="search-result-excerpt topic-snippet">${escHtml(makeTextSnippet(result.excerpt || '', query))}</div>
     </button>`;
   }
-  const modeSelect = document.getElementById('contentModeSelect');
-  const mode = modeSelect ? modeSelect.value : 'sentence';
-  const href = `/?book_id=${result.book_id}&page=${encodeURIComponent(result.page || '')}&content_mode=${encodeURIComponent(mode)}`;
+  const href = `/?book_id=${result.book_id}&page=${encodeURIComponent(result.page || '')}`;
   const location = `${escHtml(result.chapter_name || '')} · p. ${escHtml(result.page || '')} · ¶${result.paragraph || ''} · v${result.verse || ''}`;
   const topics = (result.topics || []).map(topic => `<span class="badge text-bg-secondary me-1">${escHtml(topic.name)}</span>`).join('');
   return `<a class="search-result-item" href="${href}">
@@ -372,7 +353,7 @@ function loadPageSummary() {
             ['Ch', c.chapter],
             ['Page', c.page],
             ['Para', c.paragraph],
-            ['Verse', c.verse || c.line],
+            ['Verse', c.verse],
           ]);
           summaryCards.push(makeSummaryCard('Commentary', 'commentary',
             `${rankBadge(c.rank)}
@@ -400,7 +381,7 @@ function loadPageSummary() {
         data.sources.forEach(s => {
           const ref = renderSourceReferences(s.urls || (s.url ? [s.url] : []));
           const loc = s.page || s.paragraph || s.verse
-            ? `<div class="text-muted small mb-1">p. ${escHtml(s.page || '')} · ¶${s.paragraph || ''} · v${s.verse || s.line || ''}</div>`
+            ? `<div class="text-muted small mb-1">p. ${escHtml(s.page || '')} · ¶${s.paragraph || ''} · v${s.verse || ''}</div>`
             : '';
           summaryCards.push(makeSummaryCard('Other Ref', 'reference',
             `${rankBadge(s.rank)}
@@ -425,7 +406,7 @@ function loadPageSummary() {
             ['Ch', prompt.chapter],
             ['Page', prompt.page],
             ['Para', prompt.paragraph],
-            ['Verse', prompt.verse || prompt.line],
+            ['Verse', prompt.verse],
           ]);
           summaryCards.push(makeSummaryCard('Reflect', 'commentary',
             `${rankBadge(prompt.rank)}
@@ -675,7 +656,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('commChapter', data.chapter || '');
     setValue('commPage', data.page || CURRENT_PAGE || '');
     setValue('commPara', data.paragraph || '');
-    setValue('commLine', data.verse || data.line || '');
+    setValue('commLine', data.verse || '');
     setValue('commText', data.commentary_text || '');
     setValue('commRank', data.rank || '');
     showTab('#tabComm');
@@ -686,7 +667,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('reflectChapter', data.chapter || '');
     setValue('reflectPage', data.page || CURRENT_PAGE || '');
     setValue('reflectPara', data.paragraph || '');
-    setValue('reflectLine', data.verse || data.line || '');
+    setValue('reflectLine', data.verse || '');
     setValue('reflectText', data.prompt_text || '');
     setValue('reflectRank', data.rank || '');
     showTab('#tabReflect');
@@ -697,12 +678,12 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('refSrcChapter', data.source_chapter || '');
     setValue('refSrcPage', data.source_page || CURRENT_PAGE || '');
     setValue('refSrcPara', data.source_paragraph || '');
-    setValue('refSrcLine', data.source_verse || data.source_line || '');
+    setValue('refSrcLine', data.source_verse || '');
     setValue('refTargetBook', data.target_book_id || '');
     setValue('refTgtChapter', data.target_chapter || '');
     setValue('refTgtPage', data.target_page || '');
     setValue('refTgtPara', data.target_paragraph || '');
-    setValue('refTgtLine', data.target_verse || data.target_line || '');
+    setValue('refTgtLine', data.target_verse || '');
     setValue('refQuoted', data.quoted_text || '');
     setValue('refComments', data.comments || '');
     setValue('refRank', data.rank || '');
@@ -718,7 +699,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('dictChapter', lookup.chapter || '');
     setValue('dictPage', lookup.page || CURRENT_PAGE || '');
     setValue('dictPara', lookup.paragraph || '');
-    setValue('dictLine', lookup.line_number || '');
+    setValue('dictLine', lookup.verse_number || '');
     setValue('dictLineText', lookup.line_text || '');
     setValue('dictRank', lookup.rank || '');
     showTab('#tabDict');
@@ -751,7 +732,7 @@ async function loadAnnotationIntoEditor(type, id) {
     setValue('srcChapter', source.chapter || '');
     setValue('srcPage', source.page || CURRENT_PAGE || '');
     setValue('srcPara', source.paragraph || '');
-    setValue('srcVerse', source.verse || source.line || '');
+    setValue('srcVerse', source.verse || '');
     setValue('srcAuthor', source.author || '');
     setSourceUrlFields(source.urls || (source.url ? [source.url] : ['']));
     setValue('srcNotes', source.notes || '');
@@ -1143,7 +1124,7 @@ function editFragment(fragment) {
   fragment.addEventListener('keydown', onKeydown);
 }
 
-function displayFragmentText(value, mode = CONTENT_MODE) {
+function displayFragmentText(value, mode = 'sentence') {
   if (mode === 'paragraph') {
     return value;
   }
@@ -1162,7 +1143,7 @@ function fragmentUpdateUrl(fragment) {
 
 function fragmentDisplayMode(fragment) {
   if (fragment.classList.contains('pamphlet-fragment')) return 'paragraph';
-  return fragment.dataset.contentMode || CONTENT_MODE;
+  return fragment.dataset.contentMode || 'sentence';
 }
 
 function setValue(id, value) {
@@ -1252,7 +1233,7 @@ document.getElementById('dictForm').addEventListener('submit', async function (e
         chapter: document.getElementById('dictChapter').value.trim(),
         page: document.getElementById('dictPage').value.trim() || CURRENT_PAGE,
         paragraph: parseInt(document.getElementById('dictPara').value) || null,
-        line_number: parseInt(document.getElementById('dictLine').value) || null,
+        verse_number: parseInt(document.getElementById('dictLine').value) || null,
         line_text: document.getElementById('dictLineText').value.trim(),
       }),
     }).then(r => r.json());
@@ -1301,7 +1282,7 @@ document.getElementById('dictForm').addEventListener('submit', async function (e
       chapter: document.getElementById('dictChapter').value.trim(),
       page: document.getElementById('dictPage').value.trim() || CURRENT_PAGE,
       paragraph: parseInt(document.getElementById('dictPara').value) || null,
-      line_number: parseInt(document.getElementById('dictLine').value) || null,
+      verse_number: parseInt(document.getElementById('dictLine').value) || null,
       line_text: document.getElementById('dictLineText').value.trim(),
     }),
   }).then(r => r.json());
@@ -1766,7 +1747,7 @@ document.getElementById('saveContentBtn').addEventListener('click', async functi
     chapter: document.getElementById('acChapter').value.trim(),
     page: document.getElementById('acPage').value.trim() || CURRENT_PAGE,
     paragraph: parseInt(document.getElementById('acPara').value) || null,
-    line: parseInt(document.getElementById('acLine').value) || null,
+    verse: parseInt(document.getElementById('acVerse').value) || null,
     content,
   };
 

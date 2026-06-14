@@ -148,7 +148,7 @@ function renderResult(result) {
   const query = document.getElementById('searchQuery').value.trim();
   if (result.result_type === 'pamphlet') {
     const location = `${esc(result.series || '')} · p. ${esc(result.page || '')}`;
-    return `<a class="search-result-item" href="/?pamphlet_id=${result.pamphlet_id}&content_mode=sentence">
+    return `<a class="search-result-item" href="/?pamphlet_id=${result.pamphlet_id}">
       <div class="d-flex justify-content-between gap-2 mb-1">
         <strong>${location}</strong>
         <span class="text-muted small">${esc(result.pamphlet_title || '')}</span>
@@ -159,7 +159,7 @@ function renderResult(result) {
   }
   const tags = (result.topics || []).map(t => `<span class="badge text-bg-secondary me-1">${esc(t.name)}</span>`).join('');
   const location = `${esc(result.chapter_name || '')} · p. ${esc(result.page || '')} · ¶${result.paragraph || ''} · v${result.verse || ''}`;
-  return `<a class="search-result-item" href="/?book_id=${result.book_id}&page=${encodeURIComponent(result.page || '')}&content_mode=sentence">
+  return `<a class="search-result-item" href="/?book_id=${result.book_id}&page=${encodeURIComponent(result.page || '')}">
     <div class="d-flex justify-content-between gap-2 mb-1">
       <strong>${location}</strong>
       <span class="text-muted small">${esc(result.book_title || '')}</span>

@@ -577,11 +577,10 @@ def _set_setting(key, value):
     db.session.commit()
 
 
-def _build_reader_state(book, page, content_mode):
+def _build_reader_state(book, page):
     state = {
         'book': book,
         'page': page,
-        'content_mode': content_mode,
         'page_content': [],
         'content_formats': {},
         'toc_entries': [],
@@ -607,12 +606,10 @@ def _build_reader_state(book, page, content_mode):
         if index < len(page_values) - 1:
             state['next_page'] = page_values[index + 1]
 
-    q = BookContent.query.filter_by(book_id=book.id, page=page)
-    if content_mode == 'sentence':
-        q = q.order_by(BookContent.paragraph, BookContent.verse, BookContent.line, BookContent.id)
-    else:
-        q = q.order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id)
-    state['page_content'] = q.all()
+    state['page_content'] = (BookContent.query
+                             .filter_by(book_id=book.id, page=page)
+                             .order_by(BookContent.paragraph, BookContent.verse, BookContent.id)
+                             .all())
     formats = (BookContentFormat.query
                .filter_by(book_id=book.id, page=page)
                .all())
@@ -638,22 +635,14 @@ def index():
     current_page = request.args.get('page') or (
         get_book_page(current_book.id, get_current_page()) if current_book else get_current_page()
     )
-    content_mode = request.args.get('content_mode') or (
-        get_book_content_mode(current_book.id, get_current_content_mode()) if current_book else get_current_content_mode()
-    )
-    if content_mode not in ('sentence', 'line'):
-        content_mode = 'sentence'
+    content_mode = 'sentence'
 
     secondary_book_id = request.args.get('secondary_book_id', type=int)
     secondary_book = Book.query.get(secondary_book_id) if secondary_book_id else get_current_secondary_book()
     secondary_page = request.args.get('secondary_page') or (
         get_book_page(secondary_book.id, '1') if secondary_book else '1'
     )
-    secondary_content_mode = request.args.get('secondary_content_mode') or (
-        get_book_content_mode(secondary_book.id, 'sentence') if secondary_book else 'sentence'
-    )
-    if secondary_content_mode not in ('sentence', 'line'):
-        secondary_content_mode = 'sentence'
+    secondary_content_mode = 'sentence'
 
     books = Book.query.order_by(Book.title).all()
 
@@ -664,20 +653,14 @@ def index():
         if request.args.get('page'):
             _set_setting('current_page', current_page)
             _set_setting(_book_position_key(current_book.id, 'page'), current_page)
-        if request.args.get('content_mode'):
-            _set_setting('current_content_mode', content_mode)
-            _set_setting(_book_position_key(current_book.id, 'content_mode'), content_mode)
-
     if secondary_book:
         if secondary_book_id:
             _set_setting('current_secondary_book_id', secondary_book.id)
         if request.args.get('secondary_page'):
             _set_setting(_book_position_key(secondary_book.id, 'page'), secondary_page)
-        if request.args.get('secondary_content_mode'):
-            _set_setting(_book_position_key(secondary_book.id, 'content_mode'), secondary_content_mode)
 
-    primary_state = _build_reader_state(current_book, current_page, content_mode)
-    secondary_state = _build_reader_state(secondary_book, secondary_page, secondary_content_mode)
+    primary_state = _build_reader_state(current_book, current_page)
+    secondary_state = _build_reader_state(secondary_book, secondary_page)
 
     return render_template('index.html',
                            theme=theme,
@@ -743,7 +726,7 @@ def page_export_title(book_id, page):
         BookContent.query
         .filter_by(book_id=book_id, page=str(page))
         .filter((BookContent.chapter_name.isnot(None)) | (BookContent.chapter.isnot(None)))
-        .order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id)
+        .order_by(BookContent.paragraph, BookContent.verse, BookContent.id)
         .first()
     )
     if not row:

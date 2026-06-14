@@ -57,6 +57,10 @@ def _sync_sqlite_schema():
         db.session.execute(text('ALTER TABLE books ADD COLUMN pdf_path VARCHAR(1000)'))
         db.session.commit()
     content_columns = {col['name'] for col in inspector.get_columns('book_content')}
+    if 'line' in content_columns:
+        _collapse_book_content_lines()
+        inspector = inspect(db.engine)
+        content_columns = {col['name'] for col in inspector.get_columns('book_content')}
     if 'content_mode' not in content_columns:
         db.session.execute(text("ALTER TABLE book_content ADD COLUMN content_mode VARCHAR(20) NOT NULL DEFAULT 'sentence'"))
         db.session.commit()
@@ -228,6 +232,137 @@ def _sync_sqlite_schema():
     if 'rank' not in dictionary_lookup_columns:
         db.session.execute(text('ALTER TABLE dictionary_lookup ADD COLUMN rank INTEGER'))
         db.session.commit()
+
+
+def _combine_book_content_parts(parts):
+    combined = ''
+    for part in parts:
+        part = part or ''
+        if not part:
+            continue
+        if not combined:
+            combined = part
+        elif combined.endswith('-'):
+            combined = combined[:-1] + part
+        else:
+            combined = f'{combined} {part}'
+    return ' '.join(combined.split())
+
+
+def _collapse_book_content_lines():
+    """Merge imported physical-line fragments into one row per paragraph verse."""
+    rows = db.session.execute(text(
+        'SELECT id, book_id, page, paragraph, verse, content '
+        'FROM book_content '
+        'ORDER BY book_id, relative_page_number, page, paragraph, verse, line, id'
+    )).mappings().all()
+    groups = {}
+    ordered_keys = []
+    id_map = {}
+    for row in rows:
+        key = (row['book_id'], row['page'], row['paragraph'], row['verse'])
+        if row['verse'] is None:
+            key = (row['book_id'], row['page'], row['paragraph'], row['verse'], row['id'])
+        if key not in groups:
+            groups[key] = []
+            ordered_keys.append(key)
+        groups[key].append(row)
+
+    for key in ordered_keys:
+        group = groups[key]
+        keep_id = group[0]['id']
+        content = _combine_book_content_parts([row['content'] for row in group])
+        db.session.execute(
+            text('UPDATE book_content SET content = :content, content_mode = :mode WHERE id = :id'),
+            {'content': content, 'mode': 'sentence', 'id': keep_id},
+        )
+        for row in group:
+            id_map[row['id']] = keep_id
+
+    _retarget_content_topics_for_collapsed_content(id_map)
+
+    removed_ids = [old_id for old_id, keep_id in id_map.items() if old_id != keep_id]
+    for old_id in removed_ids:
+        db.session.execute(text('DELETE FROM book_content WHERE id = :id'), {'id': old_id})
+    db.session.commit()
+    _rebuild_book_content_without_line()
+
+
+def _retarget_content_topics_for_collapsed_content(id_map):
+    if not id_map:
+        return
+    links = db.session.execute(text(
+        'SELECT id, topic_id, book_content_id, start_content_id, end_content_id '
+        'FROM content_topics ORDER BY id'
+    )).mappings().all()
+    seen = {}
+    for link in links:
+        link_id = link['id']
+        book_content_id = id_map.get(link['book_content_id'], link['book_content_id'])
+        start_content_id = id_map.get(link['start_content_id'], link['start_content_id']) if link['start_content_id'] else book_content_id
+        end_content_id = id_map.get(link['end_content_id'], link['end_content_id']) if link['end_content_id'] else start_content_id
+        key = (link['topic_id'], book_content_id)
+        if key in seen:
+            kept_id = seen[key]
+            kept = db.session.execute(
+                text('SELECT start_content_id, end_content_id FROM content_topics WHERE id = :id'),
+                {'id': kept_id},
+            ).mappings().first()
+            kept_start = kept['start_content_id'] or book_content_id
+            kept_end = kept['end_content_id'] or kept_start
+            merged_start = min(kept_start, start_content_id)
+            merged_end = max(kept_end, end_content_id)
+            db.session.execute(text(
+                'UPDATE content_topics SET start_content_id = :start_id, end_content_id = :end_id WHERE id = :id'
+            ), {'start_id': merged_start, 'end_id': merged_end, 'id': kept_id})
+            db.session.execute(text('DELETE FROM content_topics WHERE id = :id'), {'id': link_id})
+            continue
+        seen[key] = link_id
+        db.session.execute(text(
+            'UPDATE content_topics '
+            'SET book_content_id = :book_content_id, start_content_id = :start_id, end_content_id = :end_id '
+            'WHERE id = :id'
+        ), {
+            'book_content_id': book_content_id,
+            'start_id': min(start_content_id, end_content_id),
+            'end_id': max(start_content_id, end_content_id),
+            'id': link_id,
+        })
+
+
+def _rebuild_book_content_without_line():
+    db.session.execute(text('PRAGMA foreign_keys=OFF'))
+    db.session.execute(text(
+        'CREATE TABLE book_content_new ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'book_id INTEGER NOT NULL, '
+        "content_mode VARCHAR(20) NOT NULL DEFAULT 'sentence', "
+        'chapter_number VARCHAR(20), '
+        'chapter_name VARCHAR(100), '
+        'chapter VARCHAR(100), '
+        'page VARCHAR(20), '
+        'relative_page_number INTEGER, '
+        'paragraph INTEGER, '
+        'verse INTEGER, '
+        'content TEXT NOT NULL, '
+        'created_at DATETIME, '
+        'FOREIGN KEY(book_id) REFERENCES books(id)'
+        ')'
+    ))
+    db.session.execute(text(
+        'INSERT INTO book_content_new ('
+        'id, book_id, content_mode, chapter_number, chapter_name, chapter, page, '
+        'relative_page_number, paragraph, verse, content, created_at'
+        ') '
+        'SELECT id, book_id, content_mode, chapter_number, chapter_name, chapter, page, '
+        'relative_page_number, paragraph, verse, content, created_at '
+        'FROM book_content'
+    ))
+    db.session.execute(text('DROP TABLE book_content'))
+    db.session.execute(text('ALTER TABLE book_content_new RENAME TO book_content'))
+    db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_book_content_book_page ON book_content(book_id, page)'))
+    db.session.execute(text('PRAGMA foreign_keys=ON'))
+    db.session.commit()
 
 
 def _seed_settings():

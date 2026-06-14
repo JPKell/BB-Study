@@ -144,12 +144,12 @@ function openRefModal(data) {
   document.getElementById('refSrcChapterFull').value = data ? (data.source_chapter || '') : '';
   document.getElementById('refSrcPageFull').value = data ? (data.source_page || '') : '';
   document.getElementById('refSrcParaFull').value = data ? (data.source_paragraph || '') : '';
-  document.getElementById('refSrcLineFull').value = data ? (data.source_verse || data.source_line || '') : '';
+  document.getElementById('refSrcLineFull').value = data ? (data.source_verse || '') : '';
   document.getElementById('refTgtBook').value = data ? data.target_book_id : '';
   document.getElementById('refTgtChapterFull').value = data ? (data.target_chapter || '') : '';
   document.getElementById('refTgtPageFull').value = data ? (data.target_page || '') : '';
   document.getElementById('refTgtParaFull').value = data ? (data.target_paragraph || '') : '';
-  document.getElementById('refTgtLineFull').value = data ? (data.target_verse || data.target_line || '') : '';
+  document.getElementById('refTgtLineFull').value = data ? (data.target_verse || '') : '';
   document.getElementById('refQuotedFull').value = data ? (data.quoted_text || '') : '';
   document.getElementById('refCommentsFull').value = data ? (data.comments || '') : '';
   document.getElementById('refModalTitle').textContent = data ? 'Edit Reference' : 'Add Reference';

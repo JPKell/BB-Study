@@ -267,7 +267,7 @@ def collect_page_export_data(book_id, page):
     book = Book.query.get_or_404(book_id)
     rows = (BookContent.query
             .filter_by(book_id=book_id, page=page)
-            .order_by(BookContent.paragraph, BookContent.line, BookContent.verse, BookContent.id)
+            .order_by(BookContent.paragraph, BookContent.verse, BookContent.id)
             .all())
     chapter = next((r.chapter_name or r.chapter for r in rows if r.chapter_name or r.chapter), '')
     relative_page_number = next((r.relative_page_number for r in rows if r.relative_page_number), None)
@@ -564,7 +564,7 @@ def build_paragraph_segments(rows, commentary_markers, format_map):
         remaining_by_location[key] = remaining_by_location.get(key, 0) + 1
     used_marker_keys = set()
     for row in rows:
-        key = (row.paragraph, row.line if row.line is not None else row.id)
+        key = (row.paragraph, row.verse if row.verse is not None else row.id)
         if current_rows and key != current_key:
             segments.append(build_line_segment(
                 current_rows, commentary_markers, used_marker_keys, format_map, remaining_by_location
@@ -2169,18 +2169,20 @@ def draw_token_line(pdf, tokens, x, y, width, style, alignment='left'):
         if token.get('type') == 'space':
             cursor_x += measure_string(' ', style.font, style.size, style.char_spacing) + extra_gap
             continue
-        for marker in token.get('markers', []):
-            draw_inline_marker(pdf, marker, cursor_x, y, style)
-            cursor_x += inline_marker_advance(marker, style)
+        markers = token.get('markers', [])
+        if markers:
+            draw_inline_marker_group(pdf, markers, cursor_x, y, style)
+            cursor_x += inline_marker_group_advance(markers, style)
         token_font = token_font_for(token, style)
         token_size = token_size_for(token, style)
         token_spacing = token_char_spacing_for(token, style)
         draw_text(pdf, cursor_x, y, token.get('text', ''), token_font, token_size,
                   token_color_for(token, style), token_spacing)
         cursor_x += measure_string(token.get('text', ''), token_font, token_size, token_spacing)
-        for marker in token.get('after_markers', []):
-            draw_inline_marker(pdf, marker, cursor_x, y, style)
-            cursor_x += inline_marker_advance(marker, style)
+        after_markers = token.get('after_markers', [])
+        if after_markers:
+            draw_inline_marker_group(pdf, after_markers, cursor_x, y, style)
+            cursor_x += inline_marker_group_advance(after_markers, style)
 
 
 def line_leading(tokens, style):
@@ -2230,8 +2232,8 @@ def token_width(token, style):
 
 
 def word_token_width(token, style):
-    marker_width = sum(inline_marker_advance(marker, style) for marker in token.get('markers', []))
-    marker_width += sum(inline_marker_advance(marker, style) for marker in token.get('after_markers', []))
+    marker_width = inline_marker_group_advance(token.get('markers', []), style)
+    marker_width += inline_marker_group_advance(token.get('after_markers', []), style)
     return marker_width + measure_string(token.get('text', ''), token_font_for(token, style),
                                          token_size_for(token, style),
                                          token_char_spacing_for(token, style))
@@ -2273,9 +2275,10 @@ def draw_original_text_line(pdf, segment, x, y, width, style, justify=False, for
                   grayscale_color(role_style.get('gray')) if role_style.get('gray') is not None else style.color,
                   fragment_spacing)
         cursor_x += measure_string(text, fragment_font, fragment_size, fragment_spacing)
-        for marker in fragment.get('markers', []):
-            draw_inline_marker(pdf, marker, cursor_x, y, style)
-            cursor_x += inline_marker_advance(marker, style)
+        markers = fragment.get('markers', [])
+        if markers:
+            draw_inline_marker_group(pdf, markers, cursor_x, y, style)
+            cursor_x += inline_marker_group_advance(markers, style)
         previous_text = text
     return y - segment_leading(segment, style)
 
@@ -2352,12 +2355,37 @@ def draw_inline_marker(pdf, marker, x, y, style):
     draw_superscript(pdf, number, x, y, marker_style)
 
 
+def draw_inline_marker_group(pdf, markers, x, y, style):
+    label = inline_marker_label(markers)
+    if not label:
+        return
+    marker_style = inline_marker_style_for(style)
+    draw_superscript(pdf, label, x, y, marker_style)
+
+
 def inline_marker_advance(marker, style):
     number = marker.get('number')
     if not number:
         return 0
     marker_style = inline_marker_style_for(style)
     return measure_string(str(number), marker_style.font, marker_style.size, marker_style.char_spacing) + 1.5
+
+
+def inline_marker_group_advance(markers, style):
+    label = inline_marker_label(markers)
+    if not label:
+        return 0
+    marker_style = inline_marker_style_for(style)
+    return measure_string(label, marker_style.font, marker_style.size, marker_style.char_spacing) + 1.5
+
+
+def inline_marker_label(markers):
+    numbers = [
+        str(marker.get('number'))
+        for marker in markers or []
+        if marker.get('number')
+    ]
+    return ','.join(numbers)
 
 
 def best_marker_phrase(commentary_text, line_text):

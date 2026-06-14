@@ -106,7 +106,7 @@ function openCommModal(data) {
   document.getElementById('commChapterFull').value = data ? (data.chapter || '') : '';
   document.getElementById('commPageFull').value = data ? (data.page || '') : '';
   document.getElementById('commParaFull').value = data ? (data.paragraph || '') : '';
-  document.getElementById('commLineFull').value = data ? (data.verse || data.line || '') : '';
+  document.getElementById('commLineFull').value = data ? (data.verse || '') : '';
   document.getElementById('commTextFull').value = data ? data.commentary_text : '';
   document.getElementById('commModalTitle').textContent = data ? 'Edit Commentary' : 'Add Commentary';
 }

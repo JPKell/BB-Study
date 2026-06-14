@@ -674,7 +674,7 @@ def write_review_files(pdf_path, parsed_pages):
         seen.add(filename)
         with (fragment_dir / filename).open('w', encoding='utf-8') as handle:
             for row in content_rows:
-                handle.write(f'p{row.paragraph}.l{row.line}.v{row.verse}\t{row.content}\n')
+                handle.write(f'p{row.paragraph}.v{row.verse}\t{row.content}\n')
     return output_dir
 
 
@@ -726,7 +726,6 @@ def import_to_database(args, toc_entries, content_lines):
                 chapter=line.chapter,
                 page=line.page,
                 paragraph=line.paragraph,
-                line=line.line,
                 verse=line.verse,
                 content=line.content,
             ))

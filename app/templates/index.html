@@ -69,12 +69,6 @@
             </div>
             {% endif %}
             <div class="col-auto">
-              <select id="contentModeSelect" class="form-select form-select-sm">
-                <option value="sentence" {% if content_mode == 'sentence' %}selected{% endif %}>Sentence / verse</option>
-                <option value="line" {% if content_mode == 'line' %}selected{% endif %}>Book lines</option>
-              </select>
-            </div>
-            <div class="col-auto">
               {% if current_book and current_book.pdf_path %}
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.book_pdf', book_id=current_book.id) }}" target="_blank" rel="noopener">
                   <i class="bi bi-file-earmark-pdf me-1"></i>PDF
@@ -91,71 +85,30 @@
           </div>
           <div class="book-content-scroll" id="pageContentArea">
             {% if page_content %}
-              {% if content_mode == 'line' %}
-                {% set cur_line = namespace(val=None) %}
-                {% set cur_para = namespace(val=None) %}
-                {% for item in page_content %}
-                  {% if item.line != cur_line.val %}
-                    {% if cur_line.val is not none %}</div>{% endif %}
-                    <div class="book-line"
-                         data-line="{{ item.line }}"
-                         data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.line }}</sup>
-                    {% set cur_line.val = item.line %}
-                    {% set cur_para.val = item.paragraph %}
-                  {% endif %}
-                  {% set fmt = content_formats.get(item.paragraph ~ '-' ~ item.verse) %}
-                  <span class="line-text verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }} {{ 'formatted-role-' ~ fmt.content_role if fmt and fmt.content_role and fmt.content_role != 'body' else '' }} {{ 'formatted-align-' ~ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
-                        data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
-                        data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
-                        data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
-                        data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
-                        data-content-id="{{ item.id }}"
-                        data-content-mode="{{ content_mode }}"
-                        data-raw-content="{{ item.content }}"
-                        data-verse-key="{{ item.paragraph }}-{{ item.verse }}"
-                        data-chapter="{{ item.chapter_name or item.chapter or '' }}"
-                        data-page="{{ item.page }}"
-                        data-paragraph="{{ item.paragraph }}"
-                        data-line="{{ item.line }}"
-                        data-verse="{{ item.verse }}">{{ item.content }} </span>
-                {% endfor %}
-                {% if page_content %}</div>{% endif %}
-              {% else %}
-                {% set cur_verse = namespace(val='') %}
-                {% set cur_para = namespace(val=None) %}
-                {% for item in page_content %}
-                  {% set verse_key = item.paragraph ~ '-' ~ item.verse %}
-                  {% if verse_key != cur_verse.val %}
-                    {% if cur_verse.val %}</div>{% endif %}
-                    {% set fmt = content_formats.get(verse_key) %}
-                    <div class="d-block line-text sentence-verse {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }} {{ 'formatted-role-' ~ fmt.content_role if fmt and fmt.content_role and fmt.content_role != 'body' else '' }} {{ 'formatted-align-' ~ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
-                         data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
-                         data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
-                         data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
-                         data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
-                         data-verse-key="{{ verse_key }}"
-                         data-paragraph-start="{{ 'true' if item.paragraph != cur_para.val else 'false' }}"><sup class="content-number">{{ item.verse }}</sup>
-                    {% set cur_verse.val = verse_key %}
-                    {% set cur_para.val = item.paragraph %}
-                  {% endif %}
-                  {% set fmt = content_formats.get(verse_key) %}
-                  <span class="verse-fragment {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }} {{ 'formatted-role-' ~ fmt.content_role if fmt and fmt.content_role and fmt.content_role != 'body' else '' }} {{ 'formatted-align-' ~ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
-                        data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
-                        data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
-                        data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
-                        data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
-                        data-content-id="{{ item.id }}"
-                        data-content-mode="{{ content_mode }}"
-                        data-raw-content="{{ item.content }}"
-                        data-verse-key="{{ verse_key }}"
-                        data-chapter="{{ item.chapter_name or item.chapter or '' }}"
-                        data-page="{{ item.page }}"
-                        data-paragraph="{{ item.paragraph }}"
-                        data-line="{{ item.line }}"
-                        data-verse="{{ item.verse }}">{% if item.content.endswith('-') %}{{ item.content[:-1] }}{% else %}{{ item.content }} {% endif %}</span>
-                {% endfor %}
-                {% if page_content %}</div>{% endif %}
-              {% endif %}
+              {% set cur_para = namespace(val=None) %}
+              {% for item in page_content %}
+                {% if item.paragraph != cur_para.val %}
+                  {% if cur_para.val is not none %}</p>{% endif %}
+                  <p class="book-paragraph" data-paragraph="{{ item.paragraph }}">
+                  {% set cur_para.val = item.paragraph %}
+                {% endif %}
+                {% set verse_key = item.paragraph ~ '-' ~ item.verse %}
+                {% set fmt = content_formats.get(verse_key) %}
+                <span class="verse-fragment sentence-verse {{ 'formatted-bold' if fmt and fmt.is_bold else '' }} {{ 'formatted-italic' if fmt and fmt.is_italic else '' }} {{ 'formatted-role-' ~ fmt.content_role if fmt and fmt.content_role and fmt.content_role != 'body' else '' }} {{ 'formatted-align-' ~ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
+                      data-is-bold="{{ 'true' if fmt and fmt.is_bold else 'false' }}"
+                      data-is-italic="{{ 'true' if fmt and fmt.is_italic else 'false' }}"
+                      data-content-role="{{ fmt.content_role if fmt and fmt.content_role else 'body' }}"
+                      data-alignment-override="{{ fmt.alignment_override if fmt and fmt.alignment_override else '' }}"
+                      data-content-id="{{ item.id }}"
+                      data-content-mode="sentence"
+                      data-raw-content="{{ item.content }}"
+                      data-verse-key="{{ verse_key }}"
+                      data-chapter="{{ item.chapter_name or item.chapter or '' }}"
+                      data-page="{{ item.page }}"
+                      data-paragraph="{{ item.paragraph }}"
+                      data-verse="{{ item.verse }}"><sup class="content-number">{{ item.verse }}</sup>{{ item.content }} </span>
+              {% endfor %}
+              {% if page_content %}</p>{% endif %}
             {% elif current_book %}
               <p class="text-muted fst-italic">No content stored for this page yet.</p>
             {% else %}
@@ -167,7 +120,7 @@
             <div>
               {% if previous_page %}
               <a class="btn btn-sm btn-outline-secondary"
-                 href="{{ url_for('main.index', book_id=current_book.id, page=previous_page, content_mode=content_mode, secondary_book_id=secondary_book.id if secondary_book else none, secondary_page=secondary_page if secondary_book else none, secondary_content_mode=secondary_content_mode if secondary_book else none) }}">
+                 href="{{ url_for('main.index', book_id=current_book.id, page=previous_page, secondary_book_id=secondary_book.id if secondary_book else none, secondary_page=secondary_page if secondary_book else none) }}">
                 <i class="bi bi-arrow-left me-1"></i>Page {{ previous_page }}
               </a>
               {% endif %}
@@ -175,7 +128,7 @@
             <div>
               {% if next_page %}
               <a class="btn btn-sm btn-outline-secondary"
-                 href="{{ url_for('main.index', book_id=current_book.id, page=next_page, content_mode=content_mode, secondary_book_id=secondary_book.id if secondary_book else none, secondary_page=secondary_page if secondary_book else none, secondary_content_mode=secondary_content_mode if secondary_book else none) }}">
+                 href="{{ url_for('main.index', book_id=current_book.id, page=next_page, secondary_book_id=secondary_book.id if secondary_book else none, secondary_page=secondary_page if secondary_book else none) }}">
                 Page {{ next_page }}<i class="bi bi-arrow-right ms-1"></i>
               </a>
               {% endif %}
@@ -213,12 +166,6 @@
             </div>
             {% endif %}
             <div class="col-auto">
-              <select id="secondaryContentModeSelect" class="form-select form-select-sm">
-                <option value="sentence" {% if secondary_content_mode == 'sentence' %}selected{% endif %}>Sentence / verse</option>
-                <option value="line" {% if secondary_content_mode == 'line' %}selected{% endif %}>Book lines</option>
-              </select>
-            </div>
-            <div class="col-auto">
               {% if secondary_book and secondary_book.pdf_path %}
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.book_pdf', book_id=secondary_book.id) }}" target="_blank" rel="noopener">
                   <i class="bi bi-file-earmark-pdf me-1"></i>PDF
@@ -229,44 +176,19 @@
           <div class="book-content-scroll" id="secondaryBookContentArea">
             {% if secondary_book %}
               {% if secondary_page_content %}
-                {% if secondary_content_mode == 'line' %}
-                  {% set sec_line = namespace(val=None) %}
-                  {% set sec_para = namespace(val=None) %}
-                  {% for item in secondary_page_content %}
-                    {% if item.line != sec_line.val %}
-                      {% if sec_line.val is not none %}</div>{% endif %}
-                      <div class="book-line"
-                           data-line="{{ item.line }}"
-                           data-paragraph-start="{{ 'true' if item.paragraph != sec_para.val else 'false' }}"><sup class="content-number">{{ item.line }}</sup>
-                      {% set sec_line.val = item.line %}
-                      {% set sec_para.val = item.paragraph %}
-                    {% endif %}
-                    <span class="line-text secondary-book-fragment"
-                          data-content-id="{{ item.id }}"
-                          data-content-mode="{{ secondary_content_mode }}"
-                          data-raw-content="{{ item.content }}">{{ item.content }} </span>
-                  {% endfor %}
-                  {% if secondary_page_content %}</div>{% endif %}
-                {% else %}
-                  {% set sec_verse = namespace(val='') %}
-                  {% set sec_para = namespace(val=None) %}
-                  {% for item in secondary_page_content %}
-                    {% set verse_key = item.paragraph ~ '-' ~ item.verse %}
-                    {% if verse_key != sec_verse.val %}
-                      {% if sec_verse.val %}</div>{% endif %}
-                      <div class="d-block line-text sentence-verse"
-                           data-verse-key="{{ verse_key }}"
-                           data-paragraph-start="{{ 'true' if item.paragraph != sec_para.val else 'false' }}"><sup class="content-number">{{ item.verse }}</sup>
-                      {% set sec_verse.val = verse_key %}
-                      {% set sec_para.val = item.paragraph %}
-                    {% endif %}
-                    <span class="secondary-book-fragment"
-                          data-content-id="{{ item.id }}"
-                          data-content-mode="{{ secondary_content_mode }}"
-                          data-raw-content="{{ item.content }}">{% if item.content.endswith('-') %}{{ item.content[:-1] }}{% else %}{{ item.content }} {% endif %}</span>
-                  {% endfor %}
-                  {% if secondary_page_content %}</div>{% endif %}
-                {% endif %}
+                {% set sec_para = namespace(val=None) %}
+                {% for item in secondary_page_content %}
+                  {% if item.paragraph != sec_para.val %}
+                    {% if sec_para.val is not none %}</p>{% endif %}
+                    <p class="book-paragraph" data-paragraph="{{ item.paragraph }}">
+                    {% set sec_para.val = item.paragraph %}
+                  {% endif %}
+                  <span class="secondary-book-fragment sentence-verse"
+                        data-content-id="{{ item.id }}"
+                        data-content-mode="sentence"
+                        data-raw-content="{{ item.content }}"><sup class="content-number">{{ item.verse }}</sup>{{ item.content }} </span>
+                {% endfor %}
+                {% if secondary_page_content %}</p>{% endif %}
               {% else %}
                 <p class="text-muted fst-italic">No content stored for this page yet.</p>
               {% endif %}
@@ -279,7 +201,7 @@
             <div>
               {% if secondary_previous_page %}
               <a class="btn btn-sm btn-outline-secondary"
-                 href="{{ url_for('main.index', book_id=current_book.id if current_book else none, page=current_page if current_book else none, content_mode=content_mode if current_book else none, secondary_book_id=secondary_book.id, secondary_page=secondary_previous_page, secondary_content_mode=secondary_content_mode) }}">
+                 href="{{ url_for('main.index', book_id=current_book.id if current_book else none, page=current_page if current_book else none, secondary_book_id=secondary_book.id, secondary_page=secondary_previous_page) }}">
                 <i class="bi bi-arrow-left me-1"></i>Page {{ secondary_previous_page }}
               </a>
               {% endif %}
@@ -287,7 +209,7 @@
             <div>
               {% if secondary_next_page %}
               <a class="btn btn-sm btn-outline-secondary"
-                 href="{{ url_for('main.index', book_id=current_book.id if current_book else none, page=current_page if current_book else none, content_mode=content_mode if current_book else none, secondary_book_id=secondary_book.id, secondary_page=secondary_next_page, secondary_content_mode=secondary_content_mode) }}">
+                 href="{{ url_for('main.index', book_id=current_book.id if current_book else none, page=current_page if current_book else none, secondary_book_id=secondary_book.id, secondary_page=secondary_next_page) }}">
                 Page {{ secondary_next_page }}<i class="bi bi-arrow-right ms-1"></i>
               </a>
               {% endif %}
@@ -401,12 +323,12 @@
                 <div class="col"><input type="text" class="form-control form-control-sm" id="dictChapter" placeholder="Chapter"></div>
                 <div class="col"><input type="text" class="form-control form-control-sm" id="dictPage" placeholder="Page"></div>
                 <div class="col"><input type="number" class="form-control form-control-sm" id="dictPara" placeholder="Para"></div>
-                <div class="col"><input type="number" class="form-control form-control-sm" id="dictLine" placeholder="Line"></div>
+                <div class="col"><input type="number" class="form-control form-control-sm" id="dictLine" placeholder="Verse"></div>
               </div>
             </div>
             <div class="mb-2">
-              <label class="form-label small mb-1">Line Text</label>
-              <input type="text" class="form-control form-control-sm" id="dictLineText" placeholder="Quoted line">
+              <label class="form-label small mb-1">Verse Text</label>
+              <input type="text" class="form-control form-control-sm" id="dictLineText" placeholder="Quoted verse">
             </div>
             <div class="mb-2">
               <label class="form-label small mb-1">Notes</label>
@@ -760,8 +682,8 @@
               <input type="number" class="form-control form-control-sm" id="acPara">
             </div>
             <div class="col">
-              <label class="form-label small">Line</label>
-              <input type="number" class="form-control form-control-sm" id="acLine">
+              <label class="form-label small">Verse</label>
+              <input type="number" class="form-control form-control-sm" id="acVerse">
             </div>
           </div>
           <div class="mb-2">
@@ -785,10 +707,8 @@
 window.BB_STUDY_CONTEXT = {
   currentBookId: {{ current_book.id if current_book else 'null' }},
   currentPage: {{ current_page|tojson }},
-  contentMode: {{ content_mode|tojson }},
   secondaryBookId: {{ secondary_book.id if secondary_book else 'null' }},
   secondaryPage: {{ secondary_page|tojson }},
-  secondaryContentMode: {{ secondary_content_mode|tojson }},
 };
 </script>
 <script src="{{ url_for('static', filename='js/index.js') }}"></script>

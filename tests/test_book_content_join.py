@@ -38,7 +38,6 @@ def _content(book, verse, content):
         chapter='Chapter',
         page='10',
         paragraph=1,
-        line=verse,
         verse=verse,
         content=content,
     )

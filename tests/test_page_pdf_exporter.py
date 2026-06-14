@@ -10,6 +10,7 @@ from app.services.page_pdf_exporter import (
     build_annotation_markers,
     build_marked_page_paragraphs,
     display_export_text,
+    inline_marker_label,
     measure_paragraph_block,
     measure_commentary_item_height,
     measure_string,
@@ -229,10 +230,25 @@ def test_inline_marker_is_attached_after_sentence_text():
     assert tokens[-1]['after_markers'] == [{'number': 7}]
 
 
+def test_multiple_inline_markers_are_comma_separated():
+    paragraph = [{
+        'fragments': [{
+            'text': 'First sentence.',
+            'markers': [{'number': 7}, {'number': 8}],
+            'content_role': 'body',
+        }],
+    }]
+
+    tokens = [token for token in paragraph_tokens(paragraph) if token.get('type') == 'word']
+
+    assert tokens[-1]['after_markers'] == [{'number': 7}, {'number': 8}]
+    assert inline_marker_label(tokens[-1]['after_markers']) == '7,8'
+
+
 def test_inline_marker_waits_for_end_of_wrapped_verse():
     rows = [
-        SimpleNamespace(id=1, paragraph=1, line=1, verse=1, content='First part of a'),
-        SimpleNamespace(id=2, paragraph=1, line=2, verse=1, content='wrapped sentence.'),
+        SimpleNamespace(id=1, paragraph=1, verse=1, content='First part of a'),
+        SimpleNamespace(id=2, paragraph=1, verse=1, content='wrapped sentence.'),
     ]
     markers = {(1, 1): [{'number': 7}], ('paragraph', 1): [(1, {'number': 7})]}
 

@@ -159,7 +159,7 @@ class BookLocation(db.Model):
             'chapter': self.chapter,
             'page': self.page,
             'paragraph': self.paragraph,
-            'line_number': self.line_number,
+            'verse_number': self.line_number,
             'line_text': self.line_text,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
@@ -187,7 +187,7 @@ class DictionaryLookup(db.Model):
             'chapter': location.chapter if location else None,
             'page': location.page if location else None,
             'paragraph': location.paragraph if location else None,
-            'line_number': location.line_number if location else None,
+            'verse_number': location.line_number if location else None,
             'line_text': location.line_text if location else None,
         }
 
@@ -228,14 +228,12 @@ class BookReference(db.Model):
             'source_page': self.source_page,
             'source_paragraph': self.source_paragraph,
             'source_verse': self.source_verse,
-            'source_line': self.source_verse,
             'target_book_id': self.target_book_id,
             'target_book_title': self.target_book.title if self.target_book else None,
             'target_chapter': self.target_chapter,
             'target_page': self.target_page,
             'target_paragraph': self.target_paragraph,
             'target_verse': self.target_verse,
-            'target_line': self.target_verse,
             'quoted_text': self.quoted_text,
             'comments': self.comments,
             'rank': self.rank,
@@ -244,7 +242,7 @@ class BookReference(db.Model):
 
 
 class BookContent(db.Model):
-    """Full text contents of a book stored line by line."""
+    """Full text contents of a book stored one sentence/verse per row."""
     __tablename__ = 'book_content'
     id = db.Column(db.Integer, primary_key=True)
     book_id = db.Column(db.Integer, db.ForeignKey('books.id'), nullable=False)
@@ -255,7 +253,6 @@ class BookContent(db.Model):
     page = db.Column(db.String(20))
     relative_page_number = db.Column(db.Integer)
     paragraph = db.Column(db.Integer)
-    line = db.Column(db.Integer)
     verse = db.Column(db.Integer)
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -276,7 +273,6 @@ class BookContent(db.Model):
             'page': self.page,
             'relative_page_number': self.relative_page_number,
             'paragraph': self.paragraph,
-            'line': self.line,
             'verse': self.verse,
             'content': self.content,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -383,11 +379,9 @@ class ContentTopic(db.Model):
             'chapter_name': content.chapter_name if content else None,
             'page': content.page if content else None,
             'paragraph': content.paragraph if content else None,
-            'line': content.line if content else None,
             'verse': content.verse if content else None,
             'end_page': content_rows[-1].page if content_rows else (content.page if content else None),
             'end_paragraph': content_rows[-1].paragraph if content_rows else (content.paragraph if content else None),
-            'end_line': content_rows[-1].line if content_rows else (content.line if content else None),
             'end_verse': content_rows[-1].verse if content_rows else (content.verse if content else None),
             'content': combined,
             'notes': self.notes,

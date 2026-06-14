@@ -29,7 +29,6 @@ def _content(book, page, verse, chapter='Chapter One'):
         page=page,
         relative_page_number=int(page),
         paragraph=1,
-        line=verse,
         verse=verse,
         content=f'Page {page} verse {verse}.',
     )
