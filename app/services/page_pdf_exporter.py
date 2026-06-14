@@ -178,6 +178,7 @@ def export_page_pdf(book_id, page, layout=None):
 def export_pages_pdf(book_id, pages, layout=None, include_topic_index=False):
     """Return PDF bytes for multiple book pages in one PDF."""
     layout = layout or ExportLayout()
+    numbering_state = {}
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=layout.page_size)
     title_data = []
@@ -197,7 +198,7 @@ def export_pages_pdf(book_id, pages, layout=None, include_topic_index=False):
                 if title_page is not None:
                     title_data.append(collect_page_export_data(book_id, title_page))
             set_pdf_title(pdf, title_data)
-        render_page_export(pdf, data, layout)
+        render_page_export(pdf, data, layout, numbering_state=numbering_state)
     if include_topic_index:
         topic_index = collect_topic_index(book_id)
         if topic_index:
@@ -316,6 +317,32 @@ def refresh_commentary_export(data):
     data.commentary = commentary_items
     data.commentary_markers = commentary_markers
     data.paragraphs = build_marked_page_paragraphs(data.content_rows, commentary_markers, data.format_map)
+
+
+def apply_annotation_numbering_state(data, numbering_state):
+    if numbering_state is None:
+        return
+    chapter_key = annotation_numbering_chapter_key(data)
+    if chapter_key in numbering_state:
+        data.commentary_marker_start = numbering_state[chapter_key] + 1
+        refresh_commentary_export(data)
+    else:
+        numbering_state[chapter_key] = data.commentary_marker_start - 1
+
+
+def update_annotation_numbering_state(data, numbering_state):
+    if numbering_state is None:
+        return
+    chapter_key = annotation_numbering_chapter_key(data)
+    numbering_state[chapter_key] = data.commentary_marker_start + placed_annotation_count(data) - 1
+
+
+def annotation_numbering_chapter_key(data):
+    return data.chapter or ''
+
+
+def placed_annotation_count(data):
+    return len(annotation_note_rows(data))
 
 
 def chapter_annotation_marker_start(book_id, page, rows):
@@ -531,26 +558,36 @@ def build_paragraph_segments(rows, commentary_markers, format_map):
     current_key = object()
     current_rows = []
     verse_values = {row.verse for row in rows}
+    remaining_by_location = {}
+    for row in rows:
+        key = location_key(row.paragraph, row.verse)
+        remaining_by_location[key] = remaining_by_location.get(key, 0) + 1
     used_marker_keys = set()
     for row in rows:
         key = (row.paragraph, row.line if row.line is not None else row.id)
         if current_rows and key != current_key:
-            segments.append(build_line_segment(current_rows, commentary_markers, used_marker_keys, format_map))
+            segments.append(build_line_segment(
+                current_rows, commentary_markers, used_marker_keys, format_map, remaining_by_location
+            ))
             current_rows = []
         current_key = key
         current_rows.append(row)
     if current_rows:
-        segments.append(build_line_segment(current_rows, commentary_markers, used_marker_keys, format_map))
+        segments.append(build_line_segment(
+            current_rows, commentary_markers, used_marker_keys, format_map, remaining_by_location
+        ))
     apply_unmatched_paragraph_markers(segments, rows[0].paragraph if rows else None, verse_values, commentary_markers)
     return [segment for segment in segments if segment['text']]
 
 
-def build_line_segment(rows, commentary_markers, used_marker_keys, format_map):
+def build_line_segment(rows, commentary_markers, used_marker_keys, format_map, remaining_by_location=None):
+    remaining_by_location = remaining_by_location or {}
     fragments = []
     for row in rows:
         key = location_key(row.paragraph, row.verse)
         markers = []
-        if key not in used_marker_keys:
+        is_last_location_fragment = remaining_by_location.get(key, 1) <= 1
+        if is_last_location_fragment and key not in used_marker_keys:
             markers = list(commentary_markers.get(key, []))
             if markers:
                 used_marker_keys.add(key)
@@ -563,6 +600,8 @@ def build_line_segment(rows, commentary_markers, used_marker_keys, format_map):
             'content_role': format_map[key].content_role if format_map.get(key) else 'body',
             'alignment_override': format_map[key].alignment_override if format_map.get(key) else '',
         })
+        if key in remaining_by_location:
+            remaining_by_location[key] -= 1
     return {
         'fragments': fragments,
         'text': combine_content_fragments(rows),
@@ -610,14 +649,17 @@ def normalize_match_text(text):
     return ' '.join((text or '').lower().split())
 
 
-def render_page_export(pdf, data, layout):
+def render_page_export(pdf, data, layout, numbering_state=None):
+    apply_annotation_numbering_state(data, numbering_state)
     if getattr(data.page_format, 'centered_export', False):
         render_centered_text_page(pdf, data, layout)
+        update_annotation_numbering_state(data, numbering_state)
         return
     width, height = layout.page_size
     y = height - layout.top_margin
     y = draw_export_header(pdf, data, layout, y)
     prepare_page_export_data(data, layout, y)
+    update_annotation_numbering_state(data, numbering_state)
     y = draw_book_and_definitions(pdf, data, layout, y)
     y -= layout.section_gap
     y = draw_annotation_sections(pdf, data, layout, y)
@@ -1969,6 +2011,10 @@ def display_export_text(text):
     return str(text or '').replace(NO_BREAK_SPACE_SENTINEL, '\u00a0')
 
 
+def normalize_reflow_hyphens(text):
+    return re.sub(r'-{2,}', '-', str(text or ''))
+
+
 def draw_paragraph_block(pdf, paragraphs, x, y, width, style, text_layout='reflow_justified', alignment='justify',
                          force_alignment=None):
     if not paragraphs:
@@ -2042,33 +2088,45 @@ def role_alignment_for_line(tokens, style):
 
 def paragraph_tokens(paragraph, preserve_hyphen=False):
     tokens = []
-    previous_text = ''
-    for segment in paragraph:
-        for fragment in segment.get('fragments', []):
-            text = (fragment.get('text') or '').strip()
-            if not text:
-                continue
-            words = protect_no_break_export_terms(text).split()
-            if not words:
-                continue
-            if tokens and previous_text and not previous_text.endswith('-'):
+    previous_joins_next = False
+    entries = [
+        (fragment, (fragment.get('text') or '').strip())
+        for segment in paragraph
+        for fragment in segment.get('fragments', [])
+        if (fragment.get('text') or '').strip()
+    ]
+    for entry_index, (fragment, raw_text) in enumerate(entries):
+        has_next_fragment = entry_index < len(entries) - 1
+        text = raw_text if preserve_hyphen else normalize_reflow_hyphens(raw_text)
+        words = protect_no_break_export_terms(text).split()
+        if not words:
+            continue
+        if tokens and not previous_joins_next:
+            tokens.append({'type': 'space'})
+        markers = fragment.get('markers', [])
+        remove_trailing_hyphen = (
+            not preserve_hyphen
+            and has_next_fragment
+            and raw_text.endswith('-')
+            and not raw_text.endswith('--')
+        )
+        for word_index, word in enumerate(words):
+            word_text = word
+            if remove_trailing_hyphen and word_index == len(words) - 1 and word_text.endswith('-'):
+                word_text = word_text[:-1]
+            tokens.append({
+                'type': 'word',
+                'text': word_text,
+                'markers': [],
+                'after_markers': markers if word_index == len(words) - 1 else [],
+                'is_bold': bool(fragment.get('is_bold')),
+                'is_italic': bool(fragment.get('is_italic')),
+                'content_role': fragment.get('content_role') or 'body',
+                'alignment_override': fragment.get('alignment_override') or '',
+            })
+            if word_index < len(words) - 1:
                 tokens.append({'type': 'space'})
-            markers = fragment.get('markers', [])
-            for word_index, word in enumerate(words):
-                word_text = word if preserve_hyphen else (word[:-1] if word.endswith('-') else word)
-                tokens.append({
-                    'type': 'word',
-                    'text': word_text,
-                    'markers': [],
-                    'after_markers': markers if word_index == len(words) - 1 else [],
-                    'is_bold': bool(fragment.get('is_bold')),
-                    'is_italic': bool(fragment.get('is_italic')),
-                    'content_role': fragment.get('content_role') or 'body',
-                    'alignment_override': fragment.get('alignment_override') or '',
-                })
-                if word_index < len(words) - 1:
-                    tokens.append({'type': 'space'})
-            previous_text = text
+        previous_joins_next = has_next_fragment and raw_text.endswith('-')
     return tokens
 
 

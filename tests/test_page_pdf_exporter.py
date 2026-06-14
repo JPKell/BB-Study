@@ -1,16 +1,21 @@
 """Unit tests for page PDF export layout helpers."""
 
+from types import SimpleNamespace
+
 from app.services.page_pdf_exporter import (
     ExportLayout,
     TextStyle,
     allocate_annotation_columns,
+    apply_annotation_numbering_state,
     build_annotation_markers,
+    build_marked_page_paragraphs,
     display_export_text,
     measure_paragraph_block,
     measure_commentary_item_height,
     measure_string,
     paragraph_tokens,
     prune_bottom_annotations,
+    update_annotation_numbering_state,
     wrap_text,
     wrap_word_tokens,
 )
@@ -92,6 +97,37 @@ def test_half_letter_pruning_tries_next_commentary_rank_when_first_is_too_long()
     assert data.commentary_rows == [rows[1]]
 
 
+def test_numbering_state_counts_only_annotations_kept_on_prior_page():
+    kept_note = AnnotationRow(1, 'Placed note.', 1)
+    next_note = AnnotationRow(3, 'Next page note.', 1)
+    content_row = SimpleNamespace(paragraph=1, verse=1)
+    numbering_state = {}
+
+    first_page = SimpleNamespace(
+        chapter='Chapter One',
+        commentary_marker_start=1,
+        content_rows=[content_row],
+        commentary_rows=[kept_note],
+        references=[],
+        sources=[],
+    )
+    update_annotation_numbering_state(first_page, numbering_state)
+
+    next_page = SimpleNamespace(
+        chapter='Chapter One',
+        commentary_marker_start=3,
+        content_rows=[content_row],
+        commentary_rows=[next_note],
+        references=[],
+        sources=[],
+        format_map={},
+    )
+    apply_annotation_numbering_state(next_page, numbering_state)
+
+    assert next_page.commentary_marker_start == 2
+    assert next_page.commentary[0][0] == 2
+
+
 def test_content_role_margins_are_measured_around_matching_paragraphs():
     style = TextStyle(
         font='Times-Roman',
@@ -139,6 +175,45 @@ def test_aa_initials_stay_in_one_book_text_token():
     assert display_export_text(lines[0][0]['text']) == 'A.\u00a0A.'
 
 
+def test_reflow_preserves_hyphen_at_end_of_wrapped_line():
+    paragraph = [{
+        'fragments': [{
+            'text': 'well-',
+            'markers': [],
+            'content_role': 'body',
+        }],
+    }]
+
+    tokens = [token for token in paragraph_tokens(paragraph) if token.get('type') == 'word']
+
+    assert tokens[0]['text'] == 'well-'
+
+
+def test_reflow_removes_single_split_hyphen_between_fragments():
+    paragraph = [
+        {'fragments': [{'text': 'com-', 'markers': [], 'content_role': 'body'}]},
+        {'fragments': [{'text': 'munity', 'markers': [], 'content_role': 'body'}]},
+    ]
+
+    tokens = paragraph_tokens(paragraph)
+
+    assert [token['text'] for token in tokens if token.get('type') == 'word'] == ['com', 'munity']
+    assert all(token.get('type') != 'space' for token in tokens)
+
+
+def test_reflow_reduces_double_hyphen_to_preserved_single_hyphen():
+    paragraph = [
+        {'fragments': [{'text': 'well--', 'markers': [], 'content_role': 'body'}]},
+        {'fragments': [{'text': 'being', 'markers': [], 'content_role': 'body'}]},
+        {'fragments': [{'text': 'A--B', 'markers': [], 'content_role': 'body'}]},
+    ]
+
+    tokens = paragraph_tokens(paragraph)
+
+    assert [token['text'] for token in tokens if token.get('type') == 'word'] == ['well-', 'being', 'A-B']
+    assert tokens[1].get('type') != 'space'
+
+
 def test_inline_marker_is_attached_after_sentence_text():
     paragraph = [{
         'fragments': [{
@@ -151,6 +226,20 @@ def test_inline_marker_is_attached_after_sentence_text():
     tokens = [token for token in paragraph_tokens(paragraph) if token.get('type') == 'word']
 
     assert tokens[0]['markers'] == []
+    assert tokens[-1]['after_markers'] == [{'number': 7}]
+
+
+def test_inline_marker_waits_for_end_of_wrapped_verse():
+    rows = [
+        SimpleNamespace(id=1, paragraph=1, line=1, verse=1, content='First part of a'),
+        SimpleNamespace(id=2, paragraph=1, line=2, verse=1, content='wrapped sentence.'),
+    ]
+    markers = {(1, 1): [{'number': 7}], ('paragraph', 1): [(1, {'number': 7})]}
+
+    paragraph = build_marked_page_paragraphs(rows, markers)[0]
+    tokens = [token for token in paragraph_tokens(paragraph) if token.get('type') == 'word']
+
+    assert all(token['after_markers'] == [] for token in tokens[:-1])
     assert tokens[-1]['after_markers'] == [{'number': 7}]
 
 
