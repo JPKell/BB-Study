@@ -345,6 +345,7 @@ function loadPageSummary() {
     .then(data => {
       summaryEl.innerHTML = '';
       const summaryCards = [];
+      const studyCards = makeStudySummaryCards(data);
 
       // Commentary
       if (data.commentary && data.commentary.length) {
@@ -356,23 +357,28 @@ function loadPageSummary() {
             ['Verse', c.verse],
           ]);
           summaryCards.push(makeSummaryCard('Commentary', 'commentary',
-            `${rankBadge(c.rank)}
-             <p class="mb-1">${escHtml(c.commentary_text)}</p>
-             ${loc ? `<small class="text-muted">${escHtml(loc)}</small>` : ''}`,
-            c.id, 'commentary', 'commentary', c.rank));
+            `<p class="mb-1">${escHtml(c.commentary_text)}</p>`,
+            c.id, 'commentary', 'commentary', c.rank,
+            makeHeaderMeta(c.rank, '', loc)));
         });
       }
 
       // Book references
       if (data.references && data.references.length) {
         data.references.forEach(r => {
+          const loc = makeLocationText([
+            ['Ch', r.source_chapter],
+            ['Page', r.source_page],
+            ['Para', r.source_paragraph],
+            ['Verse', r.source_verse],
+          ]);
           summaryCards.push(makeSummaryCard('Book Reference', 'reference',
-            `${rankBadge(r.rank)}
-             <p class="mb-1 fst-italic">${escHtml(r.quoted_text || '')}</p>
+            `<p class="mb-1 fst-italic">${escHtml(r.quoted_text || '')}</p>
              <p class="mb-0 small">→ <strong>${escHtml(r.target_book_title || '')}</strong>
                Ch: ${escHtml(r.target_chapter || '—')} · Pg: ${escHtml(r.target_page || '—')}</p>
              ${r.comments ? `<p class="text-muted small mb-0">${escHtml(r.comments)}</p>` : ''}`,
-            r.id, 'references', 'reference', r.rank));
+            r.id, 'references', 'reference', r.rank,
+            makeHeaderMeta(r.rank, '', loc)));
         });
       }
 
@@ -381,22 +387,15 @@ function loadPageSummary() {
         data.sources.forEach(s => {
           const ref = renderSourceReferences(s.urls || (s.url ? [s.url] : []));
           const loc = s.page || s.paragraph || s.verse
-            ? `<div class="text-muted small mb-1">p. ${escHtml(s.page || '')} · ¶${s.paragraph || ''} · v${s.verse || ''}</div>`
+            ? `p. ${s.page || ''} · ¶${s.paragraph || ''} · v${s.verse || ''}`
             : '';
           summaryCards.push(makeSummaryCard('Other Ref', 'reference',
-            `${rankBadge(s.rank)}
-             <div class="mb-1"><span class="badge text-bg-secondary">${escHtml(s.source_type || 'other')}</span></div>
-             <p class="mb-1 fw-semibold">${escHtml(s.name || '')}</p>
-             ${loc}
+            `<p class="mb-1 fw-semibold">${escHtml(s.name || '')}</p>
              ${ref}
              ${s.notes ? `<p class="text-muted small mb-0">${escHtml(s.notes)}</p>` : ''}`,
-            s.id, 'sources', 'source', s.rank));
+            s.id, 'sources', 'source', s.rank,
+            makeHeaderMeta(s.rank, s.source_type || 'other', loc)));
         });
-      }
-
-      // Dictionary lookups
-      if (data.dictionary && data.dictionary.length) {
-        summaryCards.push(makeDictionarySummaryCard(data.dictionary));
       }
 
       // Reflect prompts
@@ -409,30 +408,19 @@ function loadPageSummary() {
             ['Verse', prompt.verse],
           ]);
           summaryCards.push(makeSummaryCard('Reflect', 'commentary',
-            `${rankBadge(prompt.rank)}
-             <p class="mb-1">${escHtml(prompt.prompt_text)}</p>
-             ${loc ? `<small class="text-muted">${escHtml(loc)}</small>` : ''}`,
-            prompt.id, 'reflect-prompts', 'reflect', prompt.rank));
+            `<p class="mb-1">${escHtml(prompt.prompt_text)}</p>`,
+            prompt.id, 'reflect-prompts', 'reflect', prompt.rank,
+            makeHeaderMeta(prompt.rank, '', loc)));
           summaryCards[summaryCards.length - 1].dataset.sectionOrder = '20';
         });
       }
 
-      // Topic tags linked to content on this page
-      if (data.topics && data.topics.length) {
-        data.topics.forEach(link => {
-          const loc = `p. ${escHtml(link.page || '')} · ¶${link.paragraph || ''} · v${link.verse || ''}`;
-          summaryCards.push(makeSummaryCard('Tag', 'reference',
-            `${rankBadge(link.rank)}
-             <div class="mb-1"><span class="badge text-bg-secondary">${escHtml(link.topic_name || '')}</span></div>
-             <p class="mb-1 small text-muted">${loc}</p>
-             <p class="mb-1 topic-snippet">${escHtml(makeTextSnippet(link.content || ''))}</p>
-             ${link.notes ? `<p class="text-muted small mb-0">${escHtml(link.notes)}</p>` : ''}`,
-            link.id, 'content-topics', 'topic-link', link.rank));
-        });
-      }
+      renderStudySummaryCards(data);
 
       if (!summaryCards.length) {
-        summaryEl.innerHTML = '<p class="text-muted small mb-0">No annotations for this page yet.</p>';
+        summaryEl.innerHTML = studyCards.length
+          ? '<p class="text-muted small mb-0">No commentary, references, or prompts for this page yet.</p>'
+          : '<p class="text-muted small mb-0">No annotations for this page yet.</p>';
         return;
       }
       assignFallbackRanks(summaryCards);
@@ -441,10 +429,11 @@ function loadPageSummary() {
     .catch(() => {
       const summaryEl = document.getElementById('pageSummary');
       if (summaryEl) summaryEl.innerHTML = '<p class="text-danger small mb-0">Failed to load page summary.</p>';
+      renderStudySummaryCards(null, true);
     });
 }
 
-function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationType, rank) {
+function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationType, rank, headerMetaHtml = '') {
   const card = document.createElement('div');
   card.className = `card summary-card ${typeClass} annotation-card`;
   card.setAttribute('role', 'button');
@@ -453,8 +442,11 @@ function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationTyp
   card.dataset.id = id;
   card.dataset.rank = rank || '';
   card.innerHTML = `
-      <div class="card-header d-flex justify-content-between align-items-center py-1 px-2">
-        <small class="fw-semibold text-uppercase">${label}</small>
+      <div class="card-header d-flex justify-content-between align-items-center gap-2 py-1 px-2">
+        <div class="summary-card-title min-w-0">
+          <small class="summary-card-label fw-semibold text-uppercase">${label}</small>
+          ${headerMetaHtml ? `<small class="summary-card-meta">${headerMetaHtml}</small>` : ''}
+        </div>
         <div class="btn-group btn-group-sm" role="group" aria-label="Rank and delete">
           ${rankMoveButtons(endpoint, id, rank)}
           <button class="btn btn-sm btn-outline-danger border-0 py-0"
@@ -467,8 +459,12 @@ function makeSummaryCard(label, typeClass, bodyHtml, id, endpoint, annotationTyp
   return card;
 }
 
-function rankBadge(rank) {
-  return rank ? `<div class="mb-1"><span class="badge text-bg-light text-secondary">Rank ${escHtml(rank)}</span></div>` : '';
+function makeHeaderMeta(rank, tag, location) {
+  return [
+    rank ? `<span class="badge text-bg-light text-secondary flex-shrink-0">Rank ${escHtml(rank)}</span>` : '',
+    tag ? `<span class="badge text-bg-secondary flex-shrink-0">${escHtml(tag)}</span>` : '',
+    location ? `<span class="summary-card-location text-muted" title="${escAttr(location)}">${escHtml(location)}</span>` : '',
+  ].filter(Boolean).join('');
 }
 
 function rankMoveButtons(endpoint, id, rank) {
@@ -484,32 +480,62 @@ function rankMoveButtons(endpoint, id, rank) {
     </button>`;
 }
 
-function makeDictionarySummaryCard(entries) {
-  const card = document.createElement('div');
-  card.className = 'card summary-card dictionary';
-  const rows = entries.map(entry => `
-    <div class="dictionary-summary-row d-flex align-items-start gap-2">
-      <button class="dictionary-summary-entry text-start flex-grow-1" type="button"
-              data-annotation-type="dictionary" data-id="${entry.id}">
-        ${entry.rank ? `<span class="badge text-bg-light text-secondary me-1">Rank ${escHtml(entry.rank)}</span>` : ''}
-        <span class="fw-semibold">${escHtml(entry.word_phrase || '')}</span>
-        <span class="text-muted"> — ${escHtml(makeTextSnippet(entry.meaning || '', ''))}</span>
-      </button>
-      <div class="btn-group btn-group-sm" role="group" aria-label="Rank and delete">
-        ${rankMoveButtons('dictionary-lookup', entry.id, entry.rank)}
-        <button class="btn btn-sm btn-outline-danger border-0 py-0 dictionary-summary-delete"
-                type="button" data-id="${entry.id}" title="Delete">
-          <i class="bi bi-trash"></i>
-        </button>
-      </div>
-    </div>`).join('');
-  card.innerHTML = `
-      <div class="card-header py-1 px-2">
-        <small class="fw-semibold text-uppercase">Dictionary</small>
-      </div>
-      <div class="card-body py-2 px-2 small dictionary-summary-list">${rows}</div>`;
-  card.dataset.sectionOrder = '10';
-  return card;
+function makeDictionaryLookupSummaryCard(entry) {
+  const loc = makeLocationText([
+    ['Ch', entry.chapter],
+    ['Page', entry.page],
+    ['Para', entry.paragraph],
+    ['Verse', entry.verse_number],
+  ]);
+  return makeSummaryCard('Definition', 'dictionary',
+    `<p class="mb-1">${escHtml(makeTextSnippet(entry.meaning || '', ''))}</p>
+     ${entry.line_text ? `<p class="text-muted small mb-0 topic-snippet">${escHtml(makeTextSnippet(entry.line_text || '', ''))}</p>` : ''}
+     ${entry.notes ? `<p class="text-muted small mb-0">${escHtml(entry.notes)}</p>` : ''}`,
+    entry.id, 'dictionary-lookup', 'dictionary', entry.rank,
+    makeHeaderMeta(entry.rank, entry.word_phrase || '', loc));
+}
+
+function makeTopicSummaryCard(link) {
+  const loc = `p. ${link.page || ''} · ¶${link.paragraph || ''} · v${link.verse || ''}`;
+  return makeSummaryCard('Tag', 'reference',
+    `<p class="mb-1 topic-snippet">${escHtml(makeTextSnippet(link.content || ''))}</p>
+     ${link.notes ? `<p class="text-muted small mb-0">${escHtml(link.notes)}</p>` : ''}`,
+    link.id, 'content-topics', 'topic-link', link.rank,
+    makeHeaderMeta(link.rank, link.topic_name || '', loc));
+}
+
+function makeStudySummaryCards(data) {
+  if (!data) return [];
+  const cards = [];
+  if (data.dictionary && data.dictionary.length) {
+    data.dictionary.forEach(entry => cards.push(makeDictionaryLookupSummaryCard(entry)));
+  }
+  if (data.topics && data.topics.length) {
+    data.topics.forEach(link => cards.push(makeTopicSummaryCard(link)));
+  }
+  assignFallbackRanks(cards);
+  return cards;
+}
+
+function renderStudySummaryCards(data, failed = false) {
+  const rail = document.getElementById('pageStudyRail');
+  const summary = document.getElementById('pageStudySummaryCards');
+  const renderInto = (container, cards) => {
+    if (!container) return;
+    container.innerHTML = '';
+    if (failed) {
+      container.innerHTML = '<p class="text-danger small mb-0">Failed to load tags and definitions.</p>';
+      return;
+    }
+    if (!cards.length) {
+      container.innerHTML = '<p class="text-muted small mb-0">No tags or definitions for this page yet.</p>';
+      return;
+    }
+    cards.forEach(card => container.appendChild(card));
+  };
+
+  renderInto(rail, makeStudySummaryCards(data));
+  renderInto(summary, makeStudySummaryCards(data));
 }
 
 function renderBalancedSummaryCards(summaryEl, cards) {

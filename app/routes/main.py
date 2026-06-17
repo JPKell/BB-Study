@@ -833,6 +833,11 @@ def search():
     return render_template('search.html', theme=get_theme(), books=books)
 
 
+@main_bp.route('/db')
+def db_browser():
+    return render_template('db.html', theme=get_theme())
+
+
 @main_bp.route('/books/<int:book_id>/pdf')
 def book_pdf(book_id):
     book = Book.query.get_or_404(book_id)

@@ -5,6 +5,7 @@ Convention: POST = create, PUT = update, DELETE = delete.
 from datetime import datetime
 from collections import defaultdict
 from flask import Blueprint, jsonify, request
+from sqlalchemy import inspect, text
 from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, BookLocation,
                       DictionaryLookup, BookReference, BookContent, BookContentFormat,
                       BookPageFormat, BookTableOfContents, ContentTopic, Commentary, Source,
@@ -23,6 +24,103 @@ def _err(msg, code=400):
 
 def _ok(data=None, msg='OK'):
     return jsonify({'status': 'ok', 'message': msg, 'data': data})
+
+
+def _db_inspector():
+    return inspect(db.engine)
+
+
+def _db_table_meta(table_name):
+    inspector = _db_inspector()
+    tables = inspector.get_table_names()
+    if table_name not in tables:
+        return None
+    columns = inspector.get_columns(table_name)
+    pk = inspector.get_pk_constraint(table_name).get('constrained_columns') or []
+    return {
+        'name': table_name,
+        'columns': columns,
+        'column_names': [column['name'] for column in columns],
+        'primary_key': pk,
+    }
+
+
+def _quote_identifier(identifier):
+    return db.engine.dialect.identifier_preparer.quote(identifier)
+
+
+def _format_db_value(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace')
+    return value
+
+
+def _split_filter_clauses(filter_text):
+    clauses = []
+    chunk = []
+    quote_char = None
+    index = 0
+    while index < len(filter_text):
+        char = filter_text[index]
+        if char in ("'", '"'):
+            quote_char = None if quote_char == char else (char if quote_char is None else quote_char)
+            chunk.append(char)
+            index += 1
+            continue
+        if quote_char is None and filter_text[index:index + 5].lower() == ' and ':
+            clauses.append(''.join(chunk).strip())
+            chunk = []
+            index += 5
+            continue
+        chunk.append(char)
+        index += 1
+    if chunk:
+        clauses.append(''.join(chunk).strip())
+    return [clause for clause in clauses if clause]
+
+
+def _parse_db_filters(filter_text, column_names):
+    where_parts = []
+    params = {}
+    if not filter_text:
+        return where_parts, params, None
+    for index, clause in enumerate(_split_filter_clauses(filter_text)):
+        if '=' not in clause:
+            return None, None, f'Invalid filter clause: {clause}'
+        field, raw_value = clause.split('=', 1)
+        field = field.strip().strip('"').strip("'")
+        if field not in column_names:
+            return None, None, f'Unknown filter field: {field}'
+        value = raw_value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if value.lower() == 'null':
+            where_parts.append(f'{_quote_identifier(field)} IS NULL')
+            continue
+        param_name = f'filter_{index}'
+        where_parts.append(f'{_quote_identifier(field)} = :{param_name}')
+        params[param_name] = value
+    return where_parts, params, None
+
+
+def _parse_db_sort(sort_text, column_names):
+    order_parts = []
+    if not sort_text:
+        return order_parts, None
+    for item in sort_text.split(','):
+        if not item.strip():
+            continue
+        field, _, direction = item.partition(':')
+        field = field.strip()
+        direction = direction.strip().lower()
+        if field not in column_names:
+            return None, f'Unknown sort field: {field}'
+        if direction not in ('asc', 'desc'):
+            return None, f'Invalid sort direction for {field}'
+        order_parts.append(f'{_quote_identifier(field)} {direction.upper()}')
+    return order_parts, None
 
 
 def _normalize_match_text(value):
@@ -218,6 +316,124 @@ def _sync_location_from_line_text(location):
 @api_bp.route('/settings', methods=['GET'])
 def get_settings():
     return jsonify({s.key: s.value for s in Setting.query.all()})
+
+
+# ── DB browser ────────────────────────────────────────────────────────────────
+
+@api_bp.route('/db/tables', methods=['GET'])
+def db_tables():
+    inspector = _db_inspector()
+    tables = []
+    for table_name in inspector.get_table_names():
+        pk = inspector.get_pk_constraint(table_name).get('constrained_columns') or []
+        columns = inspector.get_columns(table_name)
+        tables.append({
+            'name': table_name,
+            'primary_key': pk,
+            'column_count': len(columns),
+        })
+    return jsonify(sorted(tables, key=lambda table: table['name']))
+
+
+@api_bp.route('/db/tables/<table_name>', methods=['GET'])
+def db_table_rows(table_name):
+    meta = _db_table_meta(table_name)
+    if not meta:
+        return _err('Unknown table', 404)
+
+    page = max(request.args.get('page', 1, type=int), 1)
+    per_page = min(max(request.args.get('per_page', 50, type=int), 10), 200)
+    offset = (page - 1) * per_page
+    filter_text = request.args.get('filter', '').strip()
+    sort_text = request.args.get('sort', '').strip()
+
+    where_parts, params, filter_error = _parse_db_filters(filter_text, meta['column_names'])
+    if filter_error:
+        return _err(filter_error)
+    order_parts, sort_error = _parse_db_sort(sort_text, meta['column_names'])
+    if sort_error:
+        return _err(sort_error)
+
+    table_sql = _quote_identifier(table_name)
+    where_sql = f" WHERE {' AND '.join(where_parts)}" if where_parts else ''
+    order_sql = f" ORDER BY {', '.join(order_parts)}" if order_parts else ''
+    limit_params = {**params, 'limit': per_page, 'offset': offset}
+
+    total = db.session.execute(text(f'SELECT COUNT(*) FROM {table_sql}{where_sql}'), params).scalar() or 0
+    result = db.session.execute(
+        text(f'SELECT * FROM {table_sql}{where_sql}{order_sql} LIMIT :limit OFFSET :offset'),
+        limit_params,
+    )
+    rows = [
+        {key: _format_db_value(value) for key, value in row._mapping.items()}
+        for row in result
+    ]
+    columns = [
+        {
+            'name': column['name'],
+            'type': str(column.get('type') or ''),
+            'nullable': column.get('nullable', True),
+            'primary_key': column['name'] in meta['primary_key'],
+        }
+        for column in meta['columns']
+    ]
+    return jsonify({
+        'table': table_name,
+        'columns': columns,
+        'primary_key': meta['primary_key'],
+        'rows': rows,
+        'page': page,
+        'per_page': per_page,
+        'total': total,
+        'pages': max((total + per_page - 1) // per_page, 1),
+    })
+
+
+@api_bp.route('/db/tables/<table_name>/updates', methods=['PUT'])
+def db_table_updates(table_name):
+    meta = _db_table_meta(table_name)
+    if not meta:
+        return _err('Unknown table', 404)
+    if not meta['primary_key']:
+        return _err('This table has no primary key and cannot be edited safely')
+
+    data = request.get_json(force=True) or {}
+    updates = data.get('updates') or []
+    if not isinstance(updates, list) or not updates:
+        return _err('No updates provided')
+
+    table_sql = _quote_identifier(table_name)
+    editable_columns = set(meta['column_names']) - set(meta['primary_key'])
+    for index, update in enumerate(updates):
+        pk = update.get('pk') or {}
+        column = update.get('column')
+        if column not in editable_columns:
+            return _err(f'Invalid editable field in update {index + 1}: {column}')
+        missing_pk = [field for field in meta['primary_key'] if field not in pk]
+        if missing_pk:
+            return _err(f'Missing primary key field(s): {", ".join(missing_pk)}')
+
+    updated = 0
+    for update in updates:
+        pk = update.get('pk') or {}
+        column = update.get('column')
+        params = {'value': update.get('value')}
+        where_parts = []
+        for pk_index, field in enumerate(meta['primary_key']):
+            param_name = f'pk_{pk_index}'
+            params[param_name] = pk[field]
+            where_parts.append(f'{_quote_identifier(field)} = :{param_name}')
+        result = db.session.execute(
+            text(
+                f'UPDATE {table_sql} '
+                f'SET {_quote_identifier(column)} = :value '
+                f"WHERE {' AND '.join(where_parts)}"
+            ),
+            params,
+        )
+        updated += result.rowcount or 0
+    db.session.commit()
+    return _ok({'updated': updated}, 'Updates committed')
 
 
 @api_bp.route('/settings/<key>', methods=['PUT'])

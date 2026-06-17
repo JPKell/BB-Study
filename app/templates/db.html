@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}DB - BB Study{% endblock %}
+
+{% block content %}
+<div class="db-browser" data-db-browser>
+  <aside class="db-sidebar">
+    <div class="db-sidebar-header">
+      <h1 class="h6 mb-0"><i class="bi bi-database me-1"></i>Tables</h1>
+    </div>
+    <div class="db-table-list list-group list-group-flush" id="dbTableList"></div>
+  </aside>
+
+  <section class="db-main">
+    <div class="db-toolbar">
+      <div class="db-title-block">
+        <h2 class="h5 mb-0" id="dbTableTitle">DB</h2>
+        <small class="text-secondary" id="dbTableMeta">Select a table</small>
+      </div>
+      <div class="db-filter-wrap">
+        <label class="visually-hidden" for="dbFilterInput">Filter</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-funnel"></i></span>
+          <input class="form-control" id="dbFilterInput" type="text"
+                 placeholder="field = value and field2 = value2">
+          <button class="btn btn-outline-secondary" type="button" id="dbClearFilterBtn" title="Clear filter">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="db-editbar">
+      <div class="input-group db-bulk-input">
+        <span class="input-group-text"><i class="bi bi-pencil-square"></i></span>
+        <input class="form-control" id="dbBulkValueInput" type="text" placeholder="Set selected fields to">
+        <button class="btn btn-outline-primary" type="button" id="dbApplyBulkBtn">Apply</button>
+      </div>
+      <div class="db-actions">
+        <span class="badge text-bg-secondary" id="dbSelectedBadge">0 selected</span>
+        <span class="badge text-bg-warning" id="dbPendingBadge">0 pending</span>
+        <button class="btn btn-success btn-sm" type="button" id="dbCommitBtn" disabled>
+          <i class="bi bi-check2 me-1"></i>Commit
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="dbCancelBtn" disabled>
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Cancel
+        </button>
+      </div>
+    </div>
+
+    <div class="db-table-shell">
+      <table class="table table-sm table-hover mb-0 db-data-table">
+        <thead id="dbTableHead"></thead>
+        <tbody id="dbTableBody">
+          <tr>
+            <td class="text-secondary p-4">Select a table to view rows.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="db-pagination">
+      <div class="text-secondary small" id="dbPageSummary"></div>
+      <div class="btn-group" role="group" aria-label="DB pagination">
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="dbPrevBtn">
+          <i class="bi bi-chevron-left"></i>
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="dbNextBtn">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </div>
+      <select class="form-select form-select-sm db-page-size" id="dbPageSize">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+      </select>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/db.js') }}"></script>
+{% endblock %}

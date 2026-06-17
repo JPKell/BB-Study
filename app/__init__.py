@@ -52,6 +52,7 @@ def create_app():
 def _sync_sqlite_schema():
     """Keep the local SQLite database compatible with lightweight model changes."""
     inspector = inspect(db.engine)
+    _normalize_blank_datetime_values(inspector)
     book_columns = {col['name'] for col in inspector.get_columns('books')}
     if 'pdf_path' not in book_columns:
         db.session.execute(text('ALTER TABLE books ADD COLUMN pdf_path VARCHAR(1000)'))
@@ -232,6 +233,41 @@ def _sync_sqlite_schema():
     if 'rank' not in dictionary_lookup_columns:
         db.session.execute(text('ALTER TABLE dictionary_lookup ADD COLUMN rank INTEGER'))
         db.session.commit()
+
+
+def _normalize_blank_datetime_values(inspector):
+    """Convert legacy blank datetime strings before SQLAlchemy materializes them."""
+    datetime_columns = {
+        'books': ('created_at',),
+        'pamphlets': ('created_at',),
+        'pamphlet_content': ('created_at',),
+        'book_content': ('created_at',),
+        'book_content_formats': ('created_at', 'updated_at'),
+        'book_page_formats': ('created_at', 'updated_at'),
+        'book_table_of_contents': ('created_at',),
+        'topics': ('created_at',),
+        'content_topics': ('created_at',),
+        'dictionary': ('created_at',),
+        'dictionary_lookup': ('created_at',),
+        'book_references': ('created_at',),
+        'commentary': ('created_at', 'updated_at'),
+        'reflect_prompts': ('created_at', 'updated_at'),
+        'sources': ('created_at', 'updated_at'),
+        'source_urls': ('created_at',),
+    }
+    table_names = set(inspector.get_table_names())
+    for table_name, columns in datetime_columns.items():
+        if table_name not in table_names:
+            continue
+        table_columns = {col['name'] for col in inspector.get_columns(table_name)}
+        for column in columns:
+            if column not in table_columns:
+                continue
+            result = db.session.execute(
+                text(f"UPDATE {table_name} SET {column} = NULL WHERE {column} = ''")
+            )
+            if result.rowcount > 0:
+                db.session.commit()
 
 
 def _combine_book_content_parts(parts):
