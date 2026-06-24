@@ -5,10 +5,6 @@ from ..page_numbers import page_label_for_relative, page_label_sort_key, populat
 from .. import db
 
 main_bp = Blueprint('main', __name__)
-EXPORT_TEXT_LAYOUTS = {'reflow_justified'}
-EXPORT_ALIGNMENTS = {'left', 'justify', 'center', 'right'}
-EXPORT_FONT_OPTIONS = {'Times-Roman', 'Helvetica', 'Courier'}
-EXPORT_PAGE_SIZES = {'letter', 'half_letter'}
 EXPORT_PAGE_SIZE_PROFILE_PREFIXES = {
     'letter': 'export_letter',
     'half_letter': 'export_half_letter',
@@ -18,162 +14,11 @@ EXPORT_GLOBAL_SETTING_KEYS = {
     'export_relative_page_start',
     'export_relative_page_end',
 }
-EXPORT_SETTING_DEFAULTS = {
-    'export_text_layout': 'reflow_justified',
-    'export_page_size': 'letter',
-    'export_include_start_blank_page': '1',
-    'export_relative_page_start': '',
-    'export_relative_page_end': '',
-    'export_book_alignment': 'justify',
-    'export_definition_alignment': 'left',
-    'export_definition_header_alignment': 'left',
-    'export_reflect_alignment': 'left',
-    'export_reflect_header_alignment': 'left',
-    'export_commentary_alignment': 'left',
-    'export_annotation_alignment': 'left',
-    'export_title_alignment': 'center',
-    'export_subtitle_alignment': 'center',
-    'export_content_chapter_alignment': 'center',
-    'export_header_alignment': 'left',
-    'export_title_font_size': '14',
-    'export_subtitle_font_size': '12',
-    'export_content_chapter_font_size': '12',
-    'export_header_font_size': '10.5',
-    'export_title_bold': '1',
-    'export_title_italic': '0',
-    'export_subtitle_bold': '0',
-    'export_subtitle_italic': '1',
-    'export_content_chapter_bold': '1',
-    'export_content_chapter_italic': '0',
-    'export_header_bold': '1',
-    'export_header_italic': '0',
-    'export_definition_bold': '0',
-    'export_definition_italic': '0',
-    'export_definition_all_caps': '0',
-    'export_definition_header_bold': '1',
-    'export_definition_header_italic': '0',
-    'export_definition_header_all_caps': '0',
-    'export_reflect_bold': '0',
-    'export_reflect_italic': '0',
-    'export_reflect_all_caps': '0',
-    'export_reflect_header_bold': '1',
-    'export_reflect_header_italic': '0',
-    'export_reflect_header_all_caps': '0',
-    'export_title_line_spacing': '1.2',
-    'export_subtitle_line_spacing': '1.2',
-    'export_content_chapter_line_spacing': '1.2',
-    'export_header_line_spacing': '1.2',
-    'export_title_margin_above': '0',
-    'export_title_margin_below': '0',
-    'export_subtitle_margin_above': '0',
-    'export_subtitle_margin_below': '0',
-    'export_content_chapter_margin_above': '0',
-    'export_content_chapter_margin_below': '0',
-    'export_header_margin_above': '0',
-    'export_header_margin_below': '0',
-    'export_definition_margin_above': '0',
-    'export_definition_margin_below': '0',
-    'export_title_kerning': '0',
-    'export_subtitle_kerning': '0',
-    'export_content_chapter_kerning': '0',
-    'export_header_kerning': '0',
-    'export_title_font': 'Times-Roman',
-    'export_subtitle_font': 'Times-Roman',
-    'export_content_chapter_font': 'Helvetica',
-    'export_header_font': 'Helvetica',
-    'export_title_gray': '0',
-    'export_subtitle_gray': '15',
-    'export_content_chapter_gray': '0',
-    'export_header_gray': '20',
-    'export_chapter_bold': '0',
-    'export_chapter_italic': '0',
-    'export_page_number_bold': '0',
-    'export_page_number_italic': '0',
-    'export_margin_top': '0.45',
-    'export_margin_bottom': '0.45',
-    'export_chapter_gap': '0.46',
-    'export_page_number_gap': '0.35',
-    'export_inside_margin': '0.80',
-    'export_outside_margin': '0.45',
-    'export_column_gutter': '0.22',
-    'export_text_ratio': '0.667',
-    'export_commentary_columns': '3',
-    'export_commentary_column_gutter': '0.32',
-    'export_one_column_top': '0',
-    'export_section_gap': '0.18',
-    'export_rule_margin_above': '0.04',
-    'export_rule_margin_below': '0.21',
-    'export_chapter_font_size': '8.5',
-    'export_page_number_font_size': '8',
-    'export_book_font_size': '10.2',
-    'export_definition_font_size': '8.3',
-    'export_definition_header_font_size': '8.3',
-    'export_reflect_font_size': '8.3',
-    'export_reflect_header_font_size': '8.3',
-    'export_commentary_font_size': '7',
-    'export_annotation_font_size': '9',
-    'export_inline_marker_font_size': '7.2',
-    'export_footnote_marker_font_size': '6.2',
-    'export_chapter_line_spacing': '1.0',
-    'export_page_number_line_spacing': '1.0',
-    'export_book_line_spacing': '1.35',
-    'export_definition_line_spacing': '1.3',
-    'export_definition_header_line_spacing': '1.3',
-    'export_reflect_line_spacing': '1.3',
-    'export_reflect_header_line_spacing': '1.3',
-    'export_commentary_line_spacing': '1.28',
-    'export_annotation_line_spacing': '1.33',
-    'export_chapter_kerning': '0',
-    'export_page_number_kerning': '0',
-    'export_book_kerning': '0',
-    'export_definition_kerning': '0',
-    'export_definition_header_kerning': '0',
-    'export_reflect_kerning': '0',
-    'export_reflect_header_kerning': '0',
-    'export_commentary_kerning': '0',
-    'export_annotation_kerning': '0',
-    'export_inline_marker_kerning': '0',
-    'export_footnote_marker_kerning': '0',
-    'export_chapter_font': 'Helvetica',
-    'export_page_number_font': 'Helvetica',
-    'export_book_font': 'Times-Roman',
-    'export_definition_font': 'Helvetica',
-    'export_definition_header_font': 'Helvetica',
-    'export_reflect_font': 'Helvetica',
-    'export_reflect_header_font': 'Helvetica',
-    'export_commentary_font': 'Helvetica',
-    'export_annotation_font': 'Helvetica',
-    'export_inline_marker_font': 'Helvetica',
-    'export_footnote_marker_font': 'Helvetica',
-    'export_chapter_gray': '30',
-    'export_page_number_gray': '40',
-    'export_book_gray': '0',
-    'export_definition_gray': '0',
-    'export_definition_header_gray': '0',
-    'export_reflect_gray': '0',
-    'export_reflect_header_gray': '0',
-    'export_commentary_gray': '0',
-    'export_annotation_gray': '0',
-    'export_inline_marker_gray': '0',
-    'export_footnote_marker_gray': '0',
-    'export_inline_marker_raise': '4',
-    'export_footnote_marker_raise': '4',
-    'export_inline_marker_bold': '1',
-    'export_inline_marker_italic': '0',
-    'export_footnote_marker_bold': '1',
-    'export_footnote_marker_italic': '0',
-    'export_reflect_margin_above': '0',
-    'export_reflect_margin_below': '0',
-}
-EXPORT_PROFILE_SETTING_KEYS = tuple(
-    key for key in EXPORT_SETTING_DEFAULTS
-    if key != 'export_page_size' and key not in EXPORT_GLOBAL_SETTING_KEYS
-)
 
 
 def get_theme():
     s = Setting.query.filter_by(key='theme').first()
-    return s.value if s else 'dark'
+    return s.value
 
 
 def get_current_book():
@@ -192,13 +37,7 @@ def get_current_secondary_book():
 
 def get_current_page():
     s = Setting.query.filter_by(key='current_page').first()
-    return s.value if s else '1'
-
-
-def get_current_content_mode():
-    s = Setting.query.filter_by(key='current_content_mode').first()
-    value = s.value if s else 'sentence'
-    return value if value in ('sentence', 'line') else 'sentence'
+    return s.value
 
 
 def _get_setting(key, default=''):
@@ -206,54 +45,22 @@ def _get_setting(key, default=''):
     return setting.value if setting and setting.value != '' else default
 
 
-def _export_profile_key(page_size, key):
-    prefix = EXPORT_PAGE_SIZE_PROFILE_PREFIXES.get(page_size, EXPORT_PAGE_SIZE_PROFILE_PREFIXES['letter'])
-    suffix = key.removeprefix('export_')
-    return f'{prefix}_{suffix}'
-
-
-def get_export_text_layout():
-    value = _get_setting('export_text_layout', 'reflow_justified')
-    return value if value in EXPORT_TEXT_LAYOUTS else 'reflow_justified'
-
-
 def get_export_setting_values():
-    values = {}
-    page_size = _get_setting('export_page_size', EXPORT_SETTING_DEFAULTS['export_page_size'])
-    if page_size not in EXPORT_PAGE_SIZES:
-        page_size = EXPORT_SETTING_DEFAULTS['export_page_size']
-    values['export_page_size'] = page_size
-    for key, default in EXPORT_SETTING_DEFAULTS.items():
-        if key == 'export_page_size':
+    values = {
+        setting.key: setting.value
+        for setting in Setting.query.filter(Setting.key.like('export_%')).all()
+    }
+    page_size = values['export_page_size']
+    prefix = EXPORT_PAGE_SIZE_PROFILE_PREFIXES[page_size]
+    for key, value in list(values.items()):
+        if not key.startswith(f'{prefix}_'):
             continue
-        if key in EXPORT_GLOBAL_SETTING_KEYS:
-            values[key] = _get_setting(key, default)
-            continue
-        profile_key = _export_profile_key(page_size, key)
-        values[key] = _get_setting(profile_key, _get_setting(key, default))
-    values['export_text_layout'] = (
-        values['export_text_layout']
-        if values['export_text_layout'] in EXPORT_TEXT_LAYOUTS
-        else 'reflow_justified'
-    )
-    for key in (
-        'export_book_alignment', 'export_definition_alignment', 'export_definition_header_alignment',
-        'export_commentary_alignment', 'export_reflect_alignment', 'export_reflect_header_alignment',
-        'export_annotation_alignment',
-        'export_title_alignment', 'export_subtitle_alignment',
-        'export_content_chapter_alignment', 'export_header_alignment',
-    ):
-        if values.get(key) not in EXPORT_ALIGNMENTS:
-            values[key] = EXPORT_SETTING_DEFAULTS[key]
+        values[f"export_{key.removeprefix(prefix + '_')}"] = value
     return values
 
 
 def _export_float_setting(values, key, minimum=None, maximum=None):
-    default = float(EXPORT_SETTING_DEFAULTS[key])
-    try:
-        value = float(values.get(key, default))
-    except (TypeError, ValueError):
-        value = default
+    value = float(values[key])
     if minimum is not None:
         value = max(minimum, value)
     if maximum is not None:
@@ -262,11 +69,7 @@ def _export_float_setting(values, key, minimum=None, maximum=None):
 
 
 def _export_int_setting(values, key, minimum=None, maximum=None):
-    default = int(float(EXPORT_SETTING_DEFAULTS[key]))
-    try:
-        value = int(float(values.get(key, default)))
-    except (TypeError, ValueError):
-        value = default
+    value = int(float(values[key]))
     if minimum is not None:
         value = max(minimum, value)
     if maximum is not None:
@@ -275,7 +78,7 @@ def _export_int_setting(values, key, minimum=None, maximum=None):
 
 
 def _export_optional_int_setting(values, key, minimum=None, maximum=None):
-    raw_value = values.get(key, '')
+    raw_value = values[key]
     if raw_value in (None, ''):
         return None
     try:
@@ -290,12 +93,11 @@ def _export_optional_int_setting(values, key, minimum=None, maximum=None):
 
 
 def _export_bool_setting(values, key):
-    return str(values.get(key, EXPORT_SETTING_DEFAULTS[key])).lower() in ('1', 'true', 'yes', 'on')
+    return str(values[key]).lower() in ('1', 'true', 'yes', 'on')
 
 
 def _export_font_setting(values, key):
-    value = values.get(key, EXPORT_SETTING_DEFAULTS[key])
-    return value if value in EXPORT_FONT_OPTIONS else EXPORT_SETTING_DEFAULTS[key]
+    return values[key]
 
 
 def build_export_layout():
@@ -465,17 +267,20 @@ def _book_position_key(book_id, suffix):
     return f'book_{book_id}_{suffix}'
 
 
+def _secondary_book_position_key(book_id, suffix):
+    return f'secondary_book_{book_id}_{suffix}'
+
+
 def get_book_page(book_id, default='1'):
     if not book_id:
         return default
     return _get_setting(_book_position_key(book_id, 'page'), default)
 
 
-def get_book_content_mode(book_id, default='sentence'):
+def get_secondary_book_page(book_id, default='1'):
     if not book_id:
         return default
-    value = _get_setting(_book_position_key(book_id, 'content_mode'), default)
-    return value if value in ('sentence', 'line') else 'sentence'
+    return _get_setting(_secondary_book_position_key(book_id, 'page'), default)
 
 
 def get_facing_page(book_id, page):
@@ -640,24 +445,24 @@ def index():
     secondary_book_id = request.args.get('secondary_book_id', type=int)
     secondary_book = Book.query.get(secondary_book_id) if secondary_book_id else get_current_secondary_book()
     secondary_page = request.args.get('secondary_page') or (
-        get_book_page(secondary_book.id, '1') if secondary_book else '1'
+        get_secondary_book_page(secondary_book.id, '1') if secondary_book else '1'
     )
     secondary_content_mode = 'sentence'
 
     books = Book.query.order_by(Book.title).all()
 
     if current_book:
-        # Keep reading position sticky across navigation to/from other pages.
-        if book_id:
-            _set_setting('current_book_id', current_book.id)
-        if request.args.get('page'):
+        # Persist the resolved location too, not just locations supplied in the
+        # query string. This makes a restored page the durable current position
+        # before the response is sent, so a later server restart returns here.
+        _set_setting('current_book_id', current_book.id)
+        if current_page:
             _set_setting('current_page', current_page)
             _set_setting(_book_position_key(current_book.id, 'page'), current_page)
     if secondary_book:
-        if secondary_book_id:
-            _set_setting('current_secondary_book_id', secondary_book.id)
-        if request.args.get('secondary_page'):
-            _set_setting(_book_position_key(secondary_book.id, 'page'), secondary_page)
+        _set_setting('current_secondary_book_id', secondary_book.id)
+        if secondary_page:
+            _set_setting(_secondary_book_position_key(secondary_book.id, 'page'), secondary_page)
 
     primary_state = _build_reader_state(current_book, current_page)
     secondary_state = _build_reader_state(secondary_book, secondary_page)
@@ -768,10 +573,7 @@ def settings():
         return redirect(url_for('main.settings'))
     return render_template('settings.html', theme=theme,
                            export_settings=export_settings,
-                           export_setting_defaults=EXPORT_SETTING_DEFAULTS,
-                           export_profile_setting_keys=EXPORT_PROFILE_SETTING_KEYS,
                            export_page_size_profile_prefixes=EXPORT_PAGE_SIZE_PROFILE_PREFIXES,
-                           export_text_layout=export_settings['export_text_layout'],
                            preview_book=preview_book,
                            preview_page=preview_page,
                            preview_pdf_url=preview_pdf_url,

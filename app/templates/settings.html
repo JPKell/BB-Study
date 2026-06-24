@@ -538,8 +538,6 @@
 
 {% block scripts %}
 <script>
-const EXPORT_SETTING_DEFAULTS = {{ export_setting_defaults|tojson }};
-const EXPORT_PROFILE_SETTING_KEYS = {{ export_profile_setting_keys|list|tojson }};
 const EXPORT_PAGE_SIZE_PROFILE_PREFIXES = {{ export_page_size_profile_prefixes|tojson }};
 const GLOBAL_EXPORT_SETTING_KEYS = new Set([
   'export_include_start_blank_page',
@@ -548,6 +546,17 @@ const GLOBAL_EXPORT_SETTING_KEYS = new Set([
 ]);
 let activeExportPageSize = {{ export_settings.export_page_size|tojson }};
 let applyingExportProfile = false;
+
+function exportProfileSettingKeys() {
+  const keys = new Set();
+  document.querySelectorAll('.export-setting-input[data-setting-key]').forEach(input => {
+    const key = input.dataset.settingKey;
+    if (key !== 'export_page_size' && !GLOBAL_EXPORT_SETTING_KEYS.has(key)) {
+      keys.add(key);
+    }
+  });
+  return Array.from(keys);
+}
 
 document.querySelectorAll('.export-setting-input').forEach(input => {
   input.addEventListener('input', () => {
@@ -597,7 +606,7 @@ function settingInput(key) {
 }
 
 function profileSettingKey(pageSize, key) {
-  const prefix = EXPORT_PAGE_SIZE_PROFILE_PREFIXES[pageSize] || EXPORT_PAGE_SIZE_PROFILE_PREFIXES.letter;
+  const prefix = EXPORT_PAGE_SIZE_PROFILE_PREFIXES[pageSize];
   return `${prefix}_${key.replace(/^export_/, '')}`;
 }
 
@@ -614,7 +623,7 @@ function saveProfileSetting(pageSize, key, value) {
 }
 
 function saveCurrentExportProfile(pageSize) {
-  const saves = EXPORT_PROFILE_SETTING_KEYS.map(key => {
+  const saves = exportProfileSettingKeys().map(key => {
     const input = settingInput(key);
     return input ? saveProfileSetting(pageSize, key, inputValue(input)) : Promise.resolve();
   });
@@ -624,11 +633,11 @@ function saveCurrentExportProfile(pageSize) {
 async function loadExportProfile(pageSize) {
   const settings = await fetch('/api/settings').then(response => response.json());
   applyingExportProfile = true;
-  EXPORT_PROFILE_SETTING_KEYS.forEach(key => {
+  exportProfileSettingKeys().forEach(key => {
     const input = settingInput(key);
     if (!input) return;
     const profileKey = profileSettingKey(pageSize, key);
-    const value = settings[profileKey] ?? settings[key] ?? EXPORT_SETTING_DEFAULTS[key] ?? '';
+    const value = settings[profileKey] ?? settings[key] ?? '';
     applySettingInputValue(input, value);
     updateGrayControl(input);
   });

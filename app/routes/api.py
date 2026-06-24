@@ -177,10 +177,6 @@ def _content_range_rows(start_id, end_id=None):
             .all())
 
 
-def _content_range_text(start_id, end_id=None):
-    return _combine_content_fragments(_content_range_rows(start_id, end_id))
-
-
 def _rank_value(row):
     rank = getattr(row, 'rank', None)
     if rank is None or rank < 1:
@@ -1393,10 +1389,6 @@ def _same_verse_rows(book_id, page, paragraph, verse):
                     BookContent.verse == verse)
             .order_by(BookContent.id)
             .all())
-
-
-def _same_verse_rows_after(row):
-    return []
 
 
 def _split_content_parts(original, data):

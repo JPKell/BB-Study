@@ -92,7 +92,7 @@ function loadSecondaryPage() {
   if (!page) return;
   Promise.all([
     persistSetting('current_secondary_book_id', bookId),
-    persistSetting(`book_${bookId}_page`, page),
+    persistSetting(`secondary_book_${bookId}_page`, page),
   ]).then(() => {
     localStorage.setItem(BOOK_PANE_TAB_KEY, '#secondaryBookPane');
     window.location.href = buildReaderUrl({ secondaryBookId: bookId, secondaryPage: page });
