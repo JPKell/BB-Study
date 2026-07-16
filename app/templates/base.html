@@ -80,6 +80,12 @@
       </ul>
       {% block navbar_tools %}{% endblock %}
       <ul class="navbar-nav ms-auto">
+        <li class="nav-item me-2">
+          <button class="btn btn-sm btn-outline-success" id="gitPublishBtn"
+                  type="button" title="Commit all changes and push to origin">
+            <i class="bi bi-cloud-arrow-up me-1"></i><span>Commit &amp; Push</span>
+          </button>
+        </li>
         <li class="nav-item">
           <a class="nav-link {% if request.endpoint == 'main.settings' %}active{% endif %}"
              href="{{ url_for('main.settings') }}"><i class="bi bi-file-earmark-pdf me-1"></i>Export Settings</a>

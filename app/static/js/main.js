@@ -21,6 +21,30 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   }
+
+  const gitPublishBtn = document.getElementById('gitPublishBtn');
+  if (gitPublishBtn) {
+    gitPublishBtn.addEventListener('click', async () => {
+      if (!window.confirm('Commit all repository changes and push them to origin?')) return;
+
+      const label = gitPublishBtn.querySelector('span');
+      const originalLabel = label.textContent;
+      gitPublishBtn.disabled = true;
+      label.textContent = 'Publishing…';
+
+      try {
+        const response = await fetch('/api/git/publish', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Commit and push failed.');
+        showAlert(payload.message, 'success', 6000);
+      } catch (error) {
+        showAlert(error.message, 'danger', 8000);
+      } finally {
+        gitPublishBtn.disabled = false;
+        label.textContent = originalLabel;
+      }
+    });
+  }
 });
 
 /* ── Alert helper ──────────────────────────────────────────────────────────── */

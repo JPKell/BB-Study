@@ -4,7 +4,7 @@ Convention: POST = create, PUT = update, DELETE = delete.
 """
 from datetime import datetime
 from collections import defaultdict
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import inspect, text
 from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, BookLocation,
                       DictionaryLookup, BookReference, BookContent, BookContentFormat,
@@ -12,6 +12,7 @@ from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, Book
                       ReflectPrompt, SourceUrl, Topic)
 from ..page_numbers import populate_book_relative_page_numbers
 from .. import db
+from ..services import git_publisher
 
 api_bp = Blueprint('api', __name__)
 CONTENT_FORMAT_ROLES = {'body', 'title', 'subtitle', 'chapter', 'header', 'poetry'}
@@ -24,6 +25,23 @@ def _err(msg, code=400):
 
 def _ok(data=None, msg='OK'):
     return jsonify({'status': 'ok', 'message': msg, 'data': data})
+
+
+@api_bp.route('/git/publish', methods=['POST'])
+def publish_git_changes():
+    """Commit all repository changes and push the current branch to origin."""
+    try:
+        result = git_publisher.commit_and_push(current_app.config['REPOSITORY_ROOT'])
+    except git_publisher.PublishInProgressError as exc:
+        return _err(str(exc), 409)
+    except git_publisher.GitPublishError as exc:
+        current_app.logger.exception('Git publish failed')
+        return _err(str(exc), 500)
+    if result['committed']:
+        message = f"Committed {result['commit']} and pushed to origin."
+    else:
+        message = f"No new changes; pushed {result['commit']} to origin."
+    return _ok(result, message)
 
 
 def _db_inspector():

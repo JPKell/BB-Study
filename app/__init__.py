@@ -14,6 +14,7 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(base_dir, 'study.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = 'bb-study-secret-key-change-in-production'
+    app.config['REPOSITORY_ROOT'] = base_dir
 
     db.init_app(app)
 
@@ -398,4 +399,3 @@ def _rebuild_book_content_without_line():
     db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_book_content_book_page ON book_content(book_id, page)'))
     db.session.execute(text('PRAGMA foreign_keys=ON'))
     db.session.commit()
-
