@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
+import shutil
 import subprocess
 import threading
 
@@ -17,10 +18,22 @@ class PublishInProgressError(GitPublishError):
 _publish_lock = threading.Lock()
 
 
+def _git_executable():
+    executable = shutil.which('git')
+    if executable:
+        return executable
+    for candidate in ('/usr/bin/git', '/usr/local/bin/git'):
+        if Path(candidate).is_file():
+            return candidate
+    raise GitPublishError(
+        'Git is not installed or is not available to the web application service.'
+    )
+
+
 def _run_git(repository_root, *args):
     try:
         return subprocess.run(
-            ['git', *args],
+            [_git_executable(), *args],
             cwd=repository_root,
             check=True,
             capture_output=True,

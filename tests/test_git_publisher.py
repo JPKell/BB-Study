@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 from app.services import git_publisher
 
@@ -33,7 +34,8 @@ def test_commit_and_push_uses_fixed_git_commands(monkeypatch, tmp_path):
         ['rev-parse', '--short'],
         ['push', 'origin'],
     ]
-    assert calls[-1][0] == ['git', 'push', 'origin', 'HEAD']
+    assert Path(calls[-1][0][0]).name == 'git'
+    assert calls[-1][0][1:] == ['push', 'origin', 'HEAD']
     assert all(call[1]['cwd'] == tmp_path.resolve() for call in calls)
     assert result['commit'] == 'abc1234'
     assert result['files'] == ['study.db', 'app/example.py']
@@ -54,6 +56,7 @@ def test_commit_and_push_still_pushes_when_there_is_no_new_commit(monkeypatch, t
     result = git_publisher.commit_and_push(tmp_path)
 
     assert not any(command[1] == 'commit' for command in calls)
-    assert calls[-1] == ['git', 'push', 'origin', 'HEAD']
+    assert Path(calls[-1][0]).name == 'git'
+    assert calls[-1][1:] == ['push', 'origin', 'HEAD']
     assert result['committed'] is False
     assert result['files'] == []
