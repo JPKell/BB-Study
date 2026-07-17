@@ -27,6 +27,12 @@ fi
 SSH_DIR="$USER_HOME/.ssh"
 KEY_PATH="$SSH_DIR/$KEY_NAME"
 PUBLIC_KEY_PATH="${KEY_PATH}.pub"
+SSH_EXECUTABLE="$(command -v ssh || true)"
+
+if [[ -z "$SSH_EXECUTABLE" || ! -x "$SSH_EXECUTABLE" ]]; then
+    echo "The OpenSSH client is not installed or could not be found."
+    exit 1
+fi
 
 install -d -m 700 -o "$RUN_USER" -g "$RUN_GROUP" "$SSH_DIR"
 
@@ -60,7 +66,7 @@ fi
 
 # Keep this key repository-specific rather than changing SSH behavior for the user.
 git -C "$APP_DIR" config core.sshCommand \
-    "ssh -i $KEY_PATH -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    "$SSH_EXECUTABLE -i $KEY_PATH -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 chown "$RUN_USER:$RUN_GROUP" "$APP_DIR/.git/config"
 
 echo
