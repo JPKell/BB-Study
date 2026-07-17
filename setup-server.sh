@@ -62,6 +62,7 @@ Group=${RUN_GROUP}
 WorkingDirectory=${APP_DIR}
 
 Environment="PATH=${VENV_DIR}/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=/home/${RUN_USER}"
 Environment="PYTHONUNBUFFERED=1"
 
 ExecStart=${VENV_DIR}/bin/gunicorn \\
