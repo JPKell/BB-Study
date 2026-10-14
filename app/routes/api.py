@@ -13,6 +13,7 @@ from ..models import (Setting, Book, Pamphlet, PamphletContent, Dictionary, Book
 from ..page_numbers import populate_book_relative_page_numbers
 from .. import db
 from ..services import git_publisher
+from ..services import ai_gateway
 
 api_bp = Blueprint('api', __name__)
 CONTENT_FORMAT_ROLES = {'body', 'title', 'subtitle', 'chapter', 'header', 'poetry'}
@@ -25,6 +26,19 @@ def _err(msg, code=400):
 
 def _ok(data=None, msg='OK'):
     return jsonify({'status': 'ok', 'message': msg, 'data': data})
+
+
+def _setting_value(key, default=''):
+    setting = Setting.query.filter_by(key=key).first()
+    return setting.value if setting else default
+
+
+def _set_setting_value(key, value):
+    setting = Setting.query.filter_by(key=key).first()
+    if not setting:
+        setting = Setting(key=key)
+        db.session.add(setting)
+    setting.value = value
 
 
 @api_bp.route('/git/publish', methods=['POST'])
@@ -329,7 +343,7 @@ def _sync_location_from_line_text(location):
 
 @api_bp.route('/settings', methods=['GET'])
 def get_settings():
-    return jsonify({s.key: s.value for s in Setting.query.all()})
+    return jsonify({s.key: s.value for s in Setting.query.all() if s.key != 'ai_api_key'})
 
 
 # ── DB browser ────────────────────────────────────────────────────────────────
@@ -382,6 +396,10 @@ def db_table_rows(table_name):
         {key: _format_db_value(value) for key, value in row._mapping.items()}
         for row in result
     ]
+    if table_name == 'settings':
+        for row in rows:
+            if row.get('key') == 'ai_api_key':
+                row['value'] = '••••••••' if row.get('value') else ''
     columns = [
         {
             'name': column['name'],
@@ -460,6 +478,90 @@ def update_setting(key):
     s.value = data.get('value', '')
     db.session.commit()
     return _ok(s.to_dict())
+
+
+# ── AI gateway ───────────────────────────────────────────────────────────────
+
+@api_bp.route('/ai/settings', methods=['GET', 'PUT'])
+def ai_settings():
+    if request.method == 'GET':
+        return jsonify({
+            'gateway_address': _setting_value('ai_gateway_address'),
+            'system_prompt': _setting_value('ai_system_prompt'),
+            'selected_model': _setting_value('ai_selected_model'),
+            'api_key_configured': bool(_setting_value('ai_api_key')),
+        })
+
+    data = request.get_json(silent=True) or {}
+    gateway_address = str(data.get('gateway_address') or '').strip().rstrip('/')
+    system_prompt = str(data.get('system_prompt') or '').strip()
+    api_key = data.get('api_key')
+    if not gateway_address:
+        return _err('Gateway address is required.')
+    try:
+        ai_gateway._endpoint(gateway_address, 'models')
+    except ai_gateway.AIGatewayError as exc:
+        return _err(str(exc))
+
+    _set_setting_value('ai_gateway_address', gateway_address)
+    _set_setting_value('ai_system_prompt', system_prompt)
+    if api_key is not None and str(api_key).strip():
+        _set_setting_value('ai_api_key', str(api_key).strip())
+    elif data.get('clear_api_key'):
+        _set_setting_value('ai_api_key', '')
+    db.session.commit()
+    return _ok({
+        'gateway_address': gateway_address,
+        'system_prompt': system_prompt,
+        'api_key_configured': bool(_setting_value('ai_api_key')),
+    }, 'AI settings saved')
+
+
+@api_bp.route('/ai/models', methods=['GET'])
+def ai_models():
+    gateway_address = _setting_value('ai_gateway_address')
+    if not gateway_address:
+        return _err('Configure the AI gateway first.', 409)
+    try:
+        models = ai_gateway.list_models(gateway_address, _setting_value('ai_api_key'))
+    except ai_gateway.AIGatewayError as exc:
+        return _err(str(exc), 502)
+    return jsonify({'models': models, 'selected_model': _setting_value('ai_selected_model')})
+
+
+@api_bp.route('/ai/chat', methods=['POST'])
+def ai_chat():
+    gateway_address = _setting_value('ai_gateway_address')
+    if not gateway_address:
+        return _err('Configure the AI gateway first.', 409)
+    data = request.get_json(silent=True) or {}
+    model = str(data.get('model') or '').strip()
+    messages = data.get('messages')
+    if not model:
+        return _err('Select a model.')
+    if not isinstance(messages, list) or not messages:
+        return _err('At least one chat message is required.')
+    clean_messages = []
+    for message in messages[-40:]:
+        if not isinstance(message, dict) or message.get('role') not in {'user', 'assistant'}:
+            return _err('Chat messages must use user or assistant roles.')
+        content = str(message.get('content') or '').strip()
+        if not content:
+            return _err('Chat messages cannot be empty.')
+        clean_messages.append({'role': message['role'], 'content': content[:50000]})
+    try:
+        response_text = ai_gateway.chat(
+            gateway_address,
+            _setting_value('ai_api_key'),
+            model,
+            clean_messages,
+            _setting_value('ai_system_prompt'),
+        )
+    except ai_gateway.AIGatewayError as exc:
+        return _err(str(exc), 502)
+    _set_setting_value('ai_selected_model', model)
+    db.session.commit()
+    return jsonify({'message': {'role': 'assistant', 'content': response_text}})
 
 
 # ── Books ─────────────────────────────────────────────────────────────────────

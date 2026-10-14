@@ -17,6 +17,7 @@ let currentVerseSelection = null;
 const TOPIC_DRAFT_KEY = 'bb-study-topic-draft';
 const BOOK_PANE_TAB_KEY = 'bb-study-active-book-pane-tab';
 const ACTIVE_TAB_KEY = 'bb-study-active-entry-tab';
+let aiConversation = [];
 
 /* ── Page navigation ───────────────────────────────────────────────────────── */
 
@@ -129,6 +130,177 @@ function persistSetting(key, value) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: String(value) }),
   });
+}
+
+/* ── AI writing assistant ─────────────────────────────────────────────────── */
+
+async function parseApiResponse(response) {
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  return payload;
+}
+
+async function loadAISettings() {
+  const response = await fetch('/api/ai/settings');
+  const settings = await parseApiResponse(response);
+  setValue('aiGatewayAddress', settings.gateway_address || '');
+  setValue('aiSystemPrompt', settings.system_prompt || '');
+  setValue('aiApiKey', '');
+  const hint = document.getElementById('aiApiKeyHint');
+  if (hint) {
+    hint.textContent = settings.api_key_configured
+      ? 'A key is saved. Leave blank to keep it.'
+      : 'No key is saved. Local gateways may allow this to be blank.';
+  }
+  if (settings.gateway_address) {
+    await loadAIModels(settings.selected_model);
+  }
+}
+
+async function loadAIModels(preferredModel = '') {
+  const select = document.getElementById('aiModelSelect');
+  if (!select) return;
+  select.disabled = true;
+  select.replaceChildren(new Option('Loading models…', ''));
+  try {
+    const response = await fetch('/api/ai/models');
+    const payload = await parseApiResponse(response);
+    select.replaceChildren();
+    if (!payload.models.length) {
+      select.append(new Option('No models returned by gateway', ''));
+      return;
+    }
+    payload.models.forEach(model => select.append(new Option(model, model)));
+    const selected = preferredModel || payload.selected_model;
+    if (selected && payload.models.includes(selected)) select.value = selected;
+  } catch (error) {
+    select.replaceChildren(new Option('Could not load models', ''));
+    throw error;
+  } finally {
+    select.disabled = false;
+  }
+}
+
+async function saveAISettings(event) {
+  event.preventDefault();
+  const saveButton = document.getElementById('aiSettingsSaveBtn');
+  const spinner = document.getElementById('aiSettingsSpinner');
+  const errorBox = document.getElementById('aiSettingsError');
+  const payload = {
+    gateway_address: document.getElementById('aiGatewayAddress').value.trim(),
+    api_key: document.getElementById('aiApiKey').value.trim(),
+    system_prompt: document.getElementById('aiSystemPrompt').value.trim(),
+  };
+  saveButton.disabled = true;
+  spinner.classList.remove('d-none');
+  errorBox.classList.add('d-none');
+  try {
+    const response = await fetch('/api/ai/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await parseApiResponse(response);
+    await loadAIModels();
+    document.getElementById('aiApiKey').value = '';
+    document.getElementById('aiApiKeyHint').textContent = result.data.api_key_configured
+      ? 'A key is saved. Leave blank to keep it.'
+      : 'No key is saved. Local gateways may allow this to be blank.';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('aiSettingsModal')).hide();
+    showAlert('AI settings saved and models loaded', 'success');
+  } catch (error) {
+    errorBox.textContent = error.message;
+    errorBox.classList.remove('d-none');
+  } finally {
+    saveButton.disabled = false;
+    spinner.classList.add('d-none');
+  }
+}
+
+function renderAIConversation() {
+  const container = document.getElementById('aiChatMessages');
+  if (!container) return;
+  container.replaceChildren();
+  if (!aiConversation.length) {
+    const empty = document.createElement('div');
+    empty.className = 'ai-chat-empty';
+    const icon = document.createElement('i');
+    icon.className = 'bi bi-stars';
+    const title = document.createElement('p');
+    title.className = 'mb-1 fw-semibold';
+    title.textContent = 'Ask for feedback on your writing';
+    const description = document.createElement('p');
+    description.className = 'small text-muted mb-0';
+    description.textContent = 'Paste a passage or describe what you would like help with.';
+    empty.append(icon, title, description);
+    container.append(empty);
+    return;
+  }
+  aiConversation.forEach(message => {
+    const row = document.createElement('div');
+    row.className = `ai-message ai-message-${message.role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'ai-message-bubble';
+    const label = document.createElement('div');
+    label.className = 'ai-message-label';
+    label.textContent = message.role === 'user' ? 'You' : 'Assistant';
+    const content = document.createElement('div');
+    content.textContent = message.content;
+    bubble.append(label, content);
+    row.append(bubble);
+    container.append(row);
+  });
+  container.scrollTop = container.scrollHeight;
+}
+
+function startNewAIConversation() {
+  aiConversation = [];
+  setValue('aiChatInput', '');
+  document.getElementById('aiChatStatus').textContent = '';
+  renderAIConversation();
+  document.getElementById('aiChatInput')?.focus();
+}
+
+async function sendAIMessage(event) {
+  event.preventDefault();
+  const input = document.getElementById('aiChatInput');
+  const sendButton = document.getElementById('aiSendBtn');
+  const modelSelect = document.getElementById('aiModelSelect');
+  const status = document.getElementById('aiChatStatus');
+  const content = input.value.trim();
+  const model = modelSelect.value;
+  if (!model) {
+    showAlert('Configure the gateway and select an AI model first', 'warning');
+    return;
+  }
+  if (!content) return;
+
+  aiConversation.push({ role: 'user', content });
+  input.value = '';
+  renderAIConversation();
+  input.disabled = true;
+  modelSelect.disabled = true;
+  sendButton.disabled = true;
+  status.textContent = 'Thinking…';
+  try {
+    const response = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: aiConversation }),
+    });
+    const payload = await parseApiResponse(response);
+    aiConversation.push(payload.message);
+    renderAIConversation();
+    status.textContent = '';
+  } catch (error) {
+    status.textContent = 'Message not sent';
+    showAlert(error.message, 'danger', 7000);
+  } finally {
+    input.disabled = false;
+    modelSelect.disabled = false;
+    sendButton.disabled = false;
+    input.focus();
+  }
 }
 
 async function loadPageFormat() {
@@ -1810,6 +1982,22 @@ document.addEventListener('DOMContentLoaded', () => {
     restoreTopicDraft();
   });
   updateTopicEndButton();
+  document.getElementById('aiSettingsForm')?.addEventListener('submit', saveAISettings);
+  document.getElementById('aiChatForm')?.addEventListener('submit', sendAIMessage);
+  document.getElementById('aiNewChatBtn')?.addEventListener('click', startNewAIConversation);
+  document.getElementById('aiModelSelect')?.addEventListener('change', event => {
+    if (event.target.value) persistSetting('ai_selected_model', event.target.value);
+  });
+  document.getElementById('aiChatInput')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      document.getElementById('aiChatForm')?.requestSubmit();
+    }
+  });
+  loadAISettings().catch(error => {
+    document.getElementById('aiModelSelect')?.replaceChildren(new Option('Configure AI settings', ''));
+    console.warn('AI settings could not be loaded:', error);
+  });
 
   document.querySelectorAll('#entryTabs [data-bs-toggle="tab"]').forEach(tab => {
     tab.addEventListener('shown.bs.tab', event => {

@@ -50,6 +50,19 @@ def _add_book_with_pages(*pages):
     return book
 
 
+def test_reader_contains_ai_chat_and_settings(app):
+    with app.app_context():
+        db.session.add(Setting(key='current_page', value='1'))
+        db.session.commit()
+    response = app.test_client().get('/')
+
+    assert response.status_code == 200
+    assert b'data-bs-target="#tabAI"' in response.data
+    assert b'id="aiChatForm"' in response.data
+    assert b'id="aiNewChatBtn"' in response.data
+    assert b'id="aiSettingsModal"' in response.data
+
+
 def test_reader_restores_last_page_after_a_fresh_visit(app):
     with app.app_context():
         book = _add_book_with_pages('1', '42')

@@ -264,8 +264,8 @@
 
   <div class="col-lg-5 col-xl-4">
     <div class="card h-100">
-      <div class="card-header">
-        <ul class="nav nav-tabs card-header-tabs" id="entryTabs">
+      <div class="card-header d-flex align-items-start justify-content-between gap-2">
+        <ul class="nav nav-tabs card-header-tabs flex-grow-1" id="entryTabs">
           <li class="nav-item">
             <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabDict">
               Dictionary
@@ -311,7 +311,17 @@
               Page
             </button>
           </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAI">
+              <i class="bi bi-stars me-1"></i>AI
+            </button>
+          </li>
         </ul>
+        <button class="btn btn-sm btn-outline-secondary ai-settings-trigger" type="button"
+                data-bs-toggle="modal" data-bs-target="#aiSettingsModal"
+                aria-label="AI settings" title="AI settings">
+          <i class="bi bi-gear"></i>
+        </button>
       </div>
       <div class="card-body tab-content overflow-auto" style="max-height:60vh;">
         <!-- Dictionary tab -->
@@ -651,8 +661,81 @@
           </div>
         </div>
 
+        <!-- AI tab -->
+        <div class="tab-pane fade" id="tabAI">
+          <div class="ai-chat-panel">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <select class="form-select form-select-sm" id="aiModelSelect" aria-label="AI model">
+                <option value="">Configure a gateway to load models</option>
+              </select>
+              <button class="btn btn-sm btn-outline-secondary flex-shrink-0" id="aiNewChatBtn" type="button" title="Start a new conversation">
+                <i class="bi bi-plus-lg me-1"></i>New
+              </button>
+            </div>
+            <div class="ai-chat-messages" id="aiChatMessages" aria-live="polite">
+              <div class="ai-chat-empty" id="aiChatEmpty">
+                <i class="bi bi-stars"></i>
+                <p class="mb-1 fw-semibold">Ask for feedback on your writing</p>
+                <p class="small text-muted mb-0">Paste a passage or describe what you would like help with.</p>
+              </div>
+            </div>
+            <form id="aiChatForm" class="ai-chat-composer mt-2">
+              <label class="visually-hidden" for="aiChatInput">Message</label>
+              <textarea class="form-control form-control-sm" id="aiChatInput" rows="3"
+                        placeholder="Ask about your writing…" required></textarea>
+              <div class="d-flex justify-content-between align-items-center gap-2 mt-2">
+                <span class="small text-muted" id="aiChatStatus"></span>
+                <button class="btn btn-sm btn-primary" id="aiSendBtn" type="submit">
+                  <i class="bi bi-send me-1"></i>Send
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
 
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- AI Settings Modal -->
+<div class="modal fade" id="aiSettingsModal" tabindex="-1" aria-labelledby="aiSettingsTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="aiSettingsForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="aiSettingsTitle"><i class="bi bi-gear me-1"></i>AI Settings</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label" for="aiGatewayAddress">Gateway address</label>
+            <input class="form-control" id="aiGatewayAddress" type="url"
+                   placeholder="http://localhost:1234/v1" required>
+            <div class="form-text">Use the base URL of an OpenAI-compatible service.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="aiApiKey">API key</label>
+            <input class="form-control" id="aiApiKey" type="password" autocomplete="new-password"
+                   placeholder="Enter an API key">
+            <div class="form-text" id="aiApiKeyHint">Leave blank to keep the saved key.</div>
+          </div>
+          <div class="mb-0">
+            <label class="form-label" for="aiSystemPrompt">System prompt</label>
+            <textarea class="form-control" id="aiSystemPrompt" rows="5"
+                      placeholder="You are a thoughtful writing assistant…"></textarea>
+          </div>
+          <div class="alert alert-danger py-2 mt-3 mb-0 d-none" id="aiSettingsError" role="alert"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="aiSettingsSaveBtn">
+            <span class="spinner-border spinner-border-sm me-1 d-none" id="aiSettingsSpinner" aria-hidden="true"></span>
+            Save &amp; load models
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
